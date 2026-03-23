@@ -13,7 +13,7 @@ var _ = os.Exit
 
 
 
-func sendResponse(connection net.Conn, correlation_id uint32) error{
+func sendResponse(connection net.Conn, correlation_id uint32) error {
 	
 	const message_size uint32 = 4
 	// correlation_id = 7
@@ -49,7 +49,7 @@ func main() {
 	}
 
 	for {
-		connection, err = l.Accept()
+		connection, err := l.Accept()
 		if err != nil {
 			fmt.Println("Error accepting connection: ", err.Error())
 			continue
