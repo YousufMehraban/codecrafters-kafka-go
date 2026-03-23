@@ -3,8 +3,8 @@ package main
 import (
 	"fmt"
 	"net"
-	"os"
 	"encoding/binary"
+	"io"
 )
 
 // Ensures gofmt doesn't remove the "net" and "os" imports in stage 1 (feel free to remove this!)
