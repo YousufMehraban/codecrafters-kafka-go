@@ -16,17 +16,25 @@ var _ = os.Exit
 
 // func sendResponse(connection net.Conn) error {
 	
-// 	const message_size uint32 = 4
-// 	const correlation_id uint32 = 4
+// 	const messageSize uint32 = 4
+// 	const correlationID uint32 = 4
 // 	byteSlice := make([] byte, 8)
 
-// 	binary.BigEndian.PutUint32(byteSlice[0:4], message_size)
-// 	binary.BigEndian.PutUint32(byteSlice[4:8], correlation_id)
+// 	binary.BigEndian.PutUint32(byteSlice[0:4], messageSize)
+// 	binary.BigEndian.PutUint32(byteSlice[4:8], correlationID)
 
 // 	_, err := connection.Write(byteSlice)
 
 // 	return err
 // }
+
+// const errorNone int16 = 0
+// const errorApiUnsupportedVersion = 35
+
+const(
+	errorNone int16 = 0
+	errorApiUnsupportedVersion int16 = 35
+)
 
 func handleKafkaRequest (connection net.Conn){
 	defer connection.Close()
@@ -36,19 +44,29 @@ func handleKafkaRequest (connection net.Conn){
 		return
 	}
 
-	message_size := binary.BigEndian.Uint32(sizeBuffer)
+	messageSize := binary.BigEndian.Uint32(sizeBuffer)
 
-	bodyBuffer := make([] byte, message_size)
+	bodyBuffer := make([] byte, messageSize)
 	if _, err := io.ReadFull(connection, bodyBuffer); err != nil{
 		return
 	}
+	apiKey := binary.BigEndian.Uint16(bodyBuffer[0:2])
+	apiVersion := binary.BigEndian.Uint16(bodyBuffer[2:4])
+	correlationID := binary.BigEndian.Uint32(bodyBuffer[4:8])
+	fmt.Printf("Received Correlation ID: %d\n", correlationID)
 
-	correlation_id := binary.BigEndian.Uint32(bodyBuffer[4:8])
-	fmt.Printf("Received Correlation ID: %d\n", correlation_id)
+	if apiVersion < 0 || apiVersion > 4 {
+		sendError(connection, correlationID, errorApiUnsupportedVersion)
+		return
+	}
 
-	response := make([] byte, 8)
-	binary.BigEndian.PutUint32(response[0:4], message_size)
-	binary.BigEndian.PutUint32(response[4:8], correlation_id)
+}
+
+func sendError(connection net.Conn, correlationID uint32, errorCode int16){
+	response := make([] byte, 10)
+	binary.BigEndian.PutUint32(response[0:4], 6)
+	binary.BigEndian.PutUint32(response[4:8], correlationID)
+	binary.BigEndian.PutUint16(response[8:10], uint16(errorCode))
 
 	connection.Write(response)
 }
