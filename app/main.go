@@ -16,6 +16,7 @@ var _ = os.Exit
 func sendResponse(connection net.Conn, correlation_id uint32) error{
 	
 	const message_size uint32 = 4
+	// correlation_id = 7
 	byteSlice := make([] byte, 8)
 
 	binary.BigEndian.PutUint32([0:4], message_size)
@@ -46,9 +47,18 @@ func main() {
 		fmt.Println("Failed to bind to port 9092")
 		os.Exit(1)
 	}
-	_, err = l.Accept()
-	if err != nil {
-		fmt.Println("Error accepting connection: ", err.Error())
-		os.Exit(1)
+
+	for {
+		connection, err = l.Accept()
+		if err != nil {
+			fmt.Println("Error accepting connection: ", err.Error())
+			continue
+		}
+
+		err = sendResponse(connection, 7)
+		if err != nil{
+			fmt.Println("Error sending Kafka response", err.Error)
+		}
+		connection.Close()
 	}
 }
