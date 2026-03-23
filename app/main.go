@@ -53,7 +53,7 @@ func handleKafkaRequest (connection net.Conn){
 	apiKey := binary.BigEndian.Uint16(bodyBuffer[0:2])
 	apiVersion := binary.BigEndian.Uint16(bodyBuffer[2:4])
 	correlationID := binary.BigEndian.Uint32(bodyBuffer[4:8])
-	fmt.Printf("Received Correlation ID: %d\n", correlationID)
+	fmt.Printf("Received Correlation ID: %d, apiKey: %d\n", correlationID, )
 
 	if apiVersion < 0 || apiVersion > 4 {
 		sendError(connection, correlationID, errorApiUnsupportedVersion)
