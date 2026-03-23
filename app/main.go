@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net"
+	"os"
 	"encoding/binary"
 	"io"
 )
@@ -31,7 +32,7 @@ func handleKafkaRequest (connection net.Conn){
 	defer connection.Close()
 
 	sizeBuffer := make([]byte, 4)
-	if _, err := io.ReadFull(connection, size); err != nill{
+	if _, err := io.ReadFull(connection, sizeBuffer); err != nil{
 		return
 	}
 
