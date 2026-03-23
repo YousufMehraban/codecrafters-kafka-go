@@ -4,11 +4,36 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"encoding/binary"
 )
 
 // Ensures gofmt doesn't remove the "net" and "os" imports in stage 1 (feel free to remove this!)
 var _ = net.Listen
 var _ = os.Exit
+
+
+
+func sendResponse(connection net.Conn, correlation_id uint32) error{
+	
+	const message_size uint32 = 4
+	byteSlice := make([] byte, 8)
+
+	binary.BigEndian.PutUint32([0:4], message_size)
+	binary.BigEndian.PutUint32([4:8], correlation_id)
+
+	_, err := connection.Write(byteSlice)
+
+	return err
+}
+
+
+
+
+
+
+
+
+
 
 func main() {
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
