@@ -50,8 +50,8 @@ func handleKafkaRequest (connection net.Conn){
 	if _, err := io.ReadFull(connection, bodyBuffer); err != nil{
 		return
 	}
-	apiKey := binary.BigEndian.Uint16(bodyBuffer[0:2])
-	apiVersion := binary.BigEndian.Uint16(bodyBuffer[2:4])
+	apiKey := int16(binary.BigEndian.Uint16(bodyBuffer[0:2]))
+	apiVersion := int16(binary.BigEndian.Uint16(bodyBuffer[2:4]))
 	correlationID := binary.BigEndian.Uint32(bodyBuffer[4:8])
 	fmt.Printf("Received Correlation ID: %d, apiKey: %d\n", correlationID, apiKey)
 
