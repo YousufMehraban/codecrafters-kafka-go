@@ -43,7 +43,7 @@ func handleKafkaRequest (connection net.Conn){
 	}
 
 	correlation_id := binary.BigEndian.Uint32(bodyBuffer[4:8])
-	fmt.Printf("Received Correlation ID: %d\n", correlationID)
+	fmt.Printf("Received Correlation ID: %d\n", correlation_id)
 
 	response := make([] byte, 8)
 	binary.BigEndian.PutUint32(response[0:4], message_size)
