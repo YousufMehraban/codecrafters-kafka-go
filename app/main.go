@@ -16,11 +16,10 @@ var _ = os.Exit
 func sendResponse(connection net.Conn, correlation_id uint32) error {
 	
 	const message_size uint32 = 4
-	// correlation_id = 7
 	byteSlice := make([] byte, 8)
 
-	binary.BigEndian.PutUint32([0:4], message_size)
-	binary.BigEndian.PutUint32([4:8], correlation_id)
+	binary.BigEndian.PutUint32(byteSlice[0:4], message_size)
+	binary.BigEndian.PutUint32(byteSlice[4:8], correlation_id)
 
 	_, err := connection.Write(byteSlice)
 
