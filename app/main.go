@@ -13,9 +13,10 @@ var _ = os.Exit
 
 
 
-func sendResponse(connection net.Conn, correlation_id uint32) error {
+func sendResponse(connection net.Conn) error {
 	
 	const message_size uint32 = 4
+	const correlation_id uint32 = 4
 	byteSlice := make([] byte, 8)
 
 	binary.BigEndian.PutUint32(byteSlice[0:4], message_size)
@@ -54,7 +55,7 @@ func main() {
 			continue
 		}
 
-		err = sendResponse(connection, 7)
+		err = sendResponse(connection)
 		if err != nil{
 			fmt.Println("Error sending Kafka response", err.Error)
 		}
