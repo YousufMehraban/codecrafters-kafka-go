@@ -176,7 +176,7 @@ func processTopicPartitionResponse(connection net.Conn, correlationID uint32, to
 
 	// Topic Authorized Operations (4 bytes)
 	authOps := make([]byte, 4)
-	binary.BigEndian.PutUint32(authOps, 0) // Or 0x00000df8 if required
+	binary.BigEndian.PutUint32(authOps, 3576) // Or 0x00000df8 if required
 	body = append(body, authOps...)
 
 	// Tagged Fields for this topic
