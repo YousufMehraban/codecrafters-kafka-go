@@ -190,7 +190,7 @@ func processTopicPartitionResponse(connection net.Conn, correlationID uint32, to
 	binary.BigEndian.PutUint32(response[4:8], correlationID)
 	copy(response[8:], body)
 
-	conn.Write(response)
+	connection.Write(response)
 
 }
 
