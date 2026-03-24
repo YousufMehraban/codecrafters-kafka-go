@@ -56,9 +56,14 @@ func processKafkaRequest (connection net.Conn, bodyBuffer []byte){
     case 18: // ApiVersions
         sendApiVersionResponse(connection, correlationID)
     case 75: // DescribeTopicPartitions
+		topicName, err := parseTopicName(bodyBuffer)
+		if err != nil{
+			fmt.Println("Error parsing topic name", err)
+			return
+		}
         // For now, you can hardcode a topic name like "unknown_topic" 
         // until you implement the code to parse it from the request body.
-        processTopicPartitionResponse(connection, correlationID, "some_topic")
+        processTopicPartitionResponse(connection, correlationID, topicName)
     default:
         fmt.Printf("Unsupported API Key: %d\n", apiKey)
     }
@@ -192,6 +197,34 @@ func processTopicPartitionResponse(connection net.Conn, correlationID uint32, to
 
 	connection.Write(response)
 
+}
+
+
+func parseTopicName(body []byte) (string, error) {
+	// 1. Skip Header: API Key (2), Version (2), CorrelationID (4)
+	offset := 8
+
+	// 2. Skip ClientID (Nullable String: 2-byte length)
+	clientIDLen := int(binary.BigEndian.Uint16(body[offset : offset+2]))
+	offset += 2
+	if clientIDLen > 0 {
+		offset += clientIDLen
+	}
+
+	// 3. Skip Request Tagged Buffer (1 byte)
+	offset += 1
+
+	// 4. Read Topics Array Length (Compact Array: 1 byte for small arrays)
+	// For CodeCrafters, this is usually 2 (indicating 1 topic)
+	offset += 1
+
+	// 5. Read Topic Name (Compact String)
+	// First byte is length + 1
+	nameLen := int(body[offset]) - 1
+	offset += 1
+	
+	topicName := string(body[offset : offset+nameLen])
+	return topicName, nil
 }
 
 
