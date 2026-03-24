@@ -62,7 +62,7 @@ func handleKafkaRequest (connection net.Conn){
 		sendError(connection, correlationID, errorNone)
 	}
 
-	sendApiVersionResponse(connection, corralationID)
+	sendApiVersionResponse(connection, correlationID)
 
 }
 
@@ -101,12 +101,12 @@ func sendApiVersionResponse(connection net.Conn, correlationID uint32){
 	// final body packet 
 	// 4 bytes messageSize + 4 bytes correlationID + len(body)
 
-	totalSize := 4 + len(body)				// storing total length of body plus corralationID.
+	totalSize := 4 + len(body)				// storing total length of body plus correlationID.
 
 	response := make([] byte, 4 + totalSize)		// creating response slice containing messageSize plus totalSize
 
 	binary.BigEndian.PutUint32(response[0:4], uint32(totalSize))   // setting first 4 bytes of response as messageSize
-	binary.BigEndian.PutUint32(response[4:8], correlationID)		// setting second 4 bytes of response as corralationID
+	binary.BigEndian.PutUint32(response[4:8], correlationID)		// setting second 4 bytes of response as correlationID
 	copy(response[8:], body)									// setting from 8th bytes to the end as body of response
 
 	connection.Write(response)								// writing/sending response throught the connection
