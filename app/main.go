@@ -113,7 +113,7 @@ func handleClientRequest(connection net.Conn){
 			return
 		}
 
-		handleKafkaRequest(connection, requestBuffer)
+		processKafkaRequest(connection, requestBuffer)
 	}
 }
 
