@@ -66,22 +66,33 @@ func sendApiVersionResponse(connection net.Conn, correlationID uint32){
 
 	body := [] byte {}
 	body = append(body, 0, 0)		// error code, 0 means no error
-	body = append(body, 2)			
+	body = append(body, 3)			// 2 entries plush one, bcx sending two api entries			
 
-	apiKeyBuffer := make([] byte, 6)
+	apiKeyBuffer18 := make([] byte, 6)
 
-	binary.BigEndian.PutUint16(apiKeyBuffer[0:2], 18) // api key
-	binary.BigEndian.PutUint16(apiKeyBuffer[2:4], 0)  // min api version
-	binary.BigEndian.PutUint16(apiKeyBuffer[4:6], 4)  // max api version
+	binary.BigEndian.PutUint16(apiKeyBuffer18[0:2], 18) // api key
+	binary.BigEndian.PutUint16(apiKeyBuffer18[2:4], 0)  // min api version
+	binary.BigEndian.PutUint16(apiKeyBuffer18[4:6], 4)  // max api version
 
-	body = append(body, apiKeyBuffer...)    // api key compact array
+	body = append(body, apiKeyBuffer18...)    // api key compact array
+	body = append(body, 0) 			75		// tagged fields
+
+
+	apiKeyBuffer75 := make([] byte, 6)
+
+	binary.BigEndian.PutUint16(apiKeyBuffer75[0:2], 75) // api key
+	binary.BigEndian.PutUint16(apiKeyBuffer75[2:4], 0)  // min api version
+	binary.BigEndian.PutUint16(apiKeyBuffer75[4:6], 4)  // max api version
+
+	body = append(body, apiKeyBuffer75...)    // api key compact array
 	body = append(body, 0) 					// tagged fields
 
 	throttleBuffer := make([] byte, 4) 		// creating a throttle time compact array usually is 0
 	binary.BigEndian.PutUint32(throttleBuffer, 0)
 	body = append(body, throttleBuffer...)		// adding throttle time compact array data into body
 	
-	body = append(body, 0)					// main tagged fields
+	body = append(body, 0)					// main tagged fields; there must be a 0 byte after each api key entry, not only one at the end.
+
 
 	// final body packet or final response
 	// 4 bytes messageSize + 4 bytes correlationID + len(body)
