@@ -149,7 +149,7 @@ func handleClientRequest(connection net.Conn){
 
 
 func processTopicPartitionResponse(connection net.Conn, correlationID uint32, topicName string){
-	body := []byte {}
+	var body []byte
 
 	throttle := make([] byte, 4) 			// throttle time 4 bytes
 	binary.BigEndian.PutUint32(throttle, 0)
