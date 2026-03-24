@@ -148,55 +148,105 @@ func handleClientRequest(connection net.Conn){
 }
 
 
-func processTopicPartitionResponse(connection net.Conn, correlationID uint32, topicName string){
-	body := []byte {}
+// func processTopicPartitionResponse(connection net.Conn, correlationID uint32, topicName string){
+// 	body := []byte {}
 
-	throttle := make([] byte, 4) 			// throttle time 4 bytes
+// 	throttle := make([] byte, 4) 			// throttle time 4 bytes
+// 	binary.BigEndian.PutUint32(throttle, 0)
+// 	body = append(body, throttle...)
+
+// 	body = append(body, 2)			// Topic
+
+// 	topicError := make([] byte, 2)			//topic error, error code 3 for UNKNOWN TOPIC OR PARTITION
+// 	binary.BigEndian.PutUint16(topicError, 3)
+// 	body = append(body, topicError...)
+
+// 	// Topic Name (Compact String: length+1 followed by string)
+// 	body = append(body, byte(len(topicName)+1))
+// 	body = append(body, []byte(topicName)...)
+
+// 	// Topic ID (16 bytes of zeros for unknown topic)
+// 	body = append(body, make([]byte, 16)...)
+
+// 	// Is Internal (1 byte)
+// 	body = append(body, 0)
+// 	// Partitions Array (Compact: 0 partitions, so length is 0 + 1 = 1)
+// 	body = append(body, 1)
+
+// 	// Topic Authorized Operations (4 bytes)
+// 	authOps := make([]byte, 4)
+// 	binary.BigEndian.PutUint32(authOps, 3576) // Or 0x00000df8 if required
+// 	body = append(body, authOps...)
+
+// 	// Tagged Fields for this topic
+// 	body = append(body, 0)
+
+// 	// 3. Next Cursor (1 byte) - 0xff indicates null/no cursor
+// 	body = append(body, 0xff)
+
+// 	// 4. Main Tagged Fields
+// 	body = append(body, 0)
+
+// 	// Final Packet: [Size] + [Correlation ID] + [Body]
+// 	totalSize := 4 + len(body)
+// 	response := make([]byte, 4+totalSize)
+// 	binary.BigEndian.PutUint32(response[0:4], uint32(totalSize))
+// 	binary.BigEndian.PutUint32(response[4:8], correlationID)
+// 	copy(response[8:], body)
+
+// 	connection.Write(response)
+
+// }
+
+func processTopicPartitionResponse(connection net.Conn, correlationID uint32, topicName string) {
+	body := []byte{}
+
+	// 1. Throttle Time (4 bytes)
+	throttle := make([]byte, 4)
 	binary.BigEndian.PutUint32(throttle, 0)
 	body = append(body, throttle...)
 
-	body = append(body, 2)			// Topic
+	// 2. Topics Array (Compact: 1 topic + 1 = 2)
+	body = append(body, 2)
 
-	topicError := make([] byte, 2)			//topic error, error code 3 for UNKNOWN TOPIC OR PARTITION
-	binary.BigEndian.PutUint16(topicError, 3)
-	body = append(body, topicError...)
+	// -- Topic Object --
+	topicErr := make([]byte, 2)
+	binary.BigEndian.PutUint16(topicErr, 3) // UNKNOWN_TOPIC_OR_PARTITION
+	body = append(body, topicErr...)
 
-	// Topic Name (Compact String: length+1 followed by string)
+	// Topic Name (Compact String)
 	body = append(body, byte(len(topicName)+1))
 	body = append(body, []byte(topicName)...)
 
-	// Topic ID (16 bytes of zeros for unknown topic)
-	body = append(body, make([]byte, 16)...)
+	body = append(body, make([]byte, 16)...) // Topic ID (zeros)
+	body = append(body, 0)                   // Is Internal
+	body = append(body, 1)                   // Partitions Array (0+1=1)
 
-	// Is Internal (1 byte)
-	body = append(body, 0)
-	// Partitions Array (Compact: 0 partitions, so length is 0 + 1 = 1)
-	body = append(body, 1)
-
-	// Topic Authorized Operations (4 bytes)
 	authOps := make([]byte, 4)
-	binary.BigEndian.PutUint32(authOps, 3576) // Or 0x00000df8 if required
+	binary.BigEndian.PutUint32(authOps, 3576) // 0x00000df8 (standard for this stage)
 	body = append(body, authOps...)
+	body = append(body, 0) // Tagged Fields for Topic
 
-	// Tagged Fields for this topic
-	body = append(body, 0)
+	// 3. Cursor & Main Tagged Fields
+	body = append(body, 0xff) // Next Cursor
+	body = append(body, 0)    // Main Tagged Fields
 
-	// 3. Next Cursor (1 byte) - 0xff indicates null/no cursor
-	body = append(body, 0xff)
+	// --- FINAL ASSEMBLY (The Critical Part) ---
+	// totalSize is CorrelationID (4) + header tagged field size 1 byte + len of body
+	headerTaggedFieldSize := 1
+	totalSize := 4 + headerTaggedFieldSize+ len(body)
+	response := make([]byte, 4 + totalSize)        // messageSize + totalSize
 
-	// 4. Main Tagged Fields
-	body = append(body, 0)
-
-	// Final Packet: [Size] + [Correlation ID] + [Body]
-	totalSize := 4 + len(body)
-	response := make([]byte, 4+totalSize)
+	// Bytes 0-3: Total Message Size
 	binary.BigEndian.PutUint32(response[0:4], uint32(totalSize))
+	// Bytes 4-7: Correlation ID (Response Header v0)
 	binary.BigEndian.PutUint32(response[4:8], correlationID)
-	copy(response[8:], body)
+	// Bytes 9+: Body
+	copy(response[9:], body)
 
 	connection.Write(response)
-
 }
+
 
 
 func parseTopicName(body []byte) (string, error) {
