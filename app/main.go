@@ -224,9 +224,11 @@ func processTopicPartitionResponse(connection net.Conn, correlationID uint32, to
 	// body = append(body, 0)                   // Is Internal
 	// body = append(body, 1)                   // Partitions Array (0+1=1)
 
-	// Topic ID (Use a fixed 16-byte UUID for a found topic)
-	topicID := []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10}
-	body = append(body, topicID...)
+    // Expected UUID: 71a59a51-8968-4f8b-937e-754e9c2593eb
+	// Convert the expected UUID string to 16 bytes
+    uuidString := "71a59a5189684f8b937e754e9c2593eb"
+    topicID, _ := hex.DecodeString(uuidString) 
+    body = append(body, topicID...)
 	body = append(body, 0)		// 0 internal bool false
 	body = append(body, 2)		// 1 partition equals to len of 2
 
