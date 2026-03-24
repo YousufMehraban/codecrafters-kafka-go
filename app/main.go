@@ -58,7 +58,7 @@ func processKafkaRequest (connection net.Conn, bodyBuffer []byte){
     case 75: // DescribeTopicPartitions
         // For now, you can hardcode a topic name like "unknown_topic" 
         // until you implement the code to parse it from the request body.
-        sendDescribeTopicPartitionsResponse(connection, correlationID, "some_topic")
+        processTopicPartitionResponse(connection, correlationID, "some_topic")
     default:
         fmt.Printf("Unsupported API Key: %d\n", apiKey)
     }
