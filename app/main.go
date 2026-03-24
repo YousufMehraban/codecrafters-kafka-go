@@ -131,7 +131,7 @@ func handleClientRequest(connection net.Conn){
 			return
 		}
 
-		// correlationID := binary.BigEndian.Uint32(requestBuffer[4:8])
+		correlationID := binary.BigEndian.Uint32(requestBuffer[4:8])
 		// errorCode := binary.BigEndian.Uint16(requestBuffer[8:10])
 		fmt.Printf("Processing request with correlationID %d\n", correlationID)
 
