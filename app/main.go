@@ -75,7 +75,7 @@ func sendApiVersionResponse(connection net.Conn, correlationID uint32){
 	binary.BigEndian.PutUint16(apiKeyBuffer18[4:6], 4)  // max api version
 
 	body = append(body, apiKeyBuffer18...)    // api key compact array
-	body = append(body, 0) 			75		// tagged fields
+	body = append(body, 0) 					// tagged fields
 
 
 	apiKeyBuffer75 := make([] byte, 6)
