@@ -190,7 +190,7 @@ func processTopicPartitionResponse(connection net.Conn, correlationID uint32, to
 
 	// Final Packet: [Size] + [Correlation ID] + [Body]
 	totalSize := 4 + len(body)
-	response := make([]byte, 4+totalSize)
+	response := make([]byte, 4 + totalSize)
 	binary.BigEndian.PutUint32(response[0:4], uint32(totalSize))
 	binary.BigEndian.PutUint32(response[4:8], correlationID)
 	copy(response[8:], body)
