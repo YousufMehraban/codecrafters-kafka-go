@@ -149,7 +149,7 @@ func handleClientRequest(connection net.Conn){
 
 
 func processTopicPartitionResponse(connection net.Conn, correlationID uint32, topicName string){
-	var body []byte
+	body := []byte {}
 
 	throttle := make([] byte, 4) 			// throttle time 4 bytes
 	binary.BigEndian.PutUint32(throttle, 0)
@@ -170,13 +170,12 @@ func processTopicPartitionResponse(connection net.Conn, correlationID uint32, to
 
 	// Is Internal (1 byte)
 	body = append(body, 0)
-
 	// Partitions Array (Compact: 0 partitions, so length is 0 + 1 = 1)
 	body = append(body, 1)
 
 	// Topic Authorized Operations (4 bytes)
 	authOps := make([]byte, 4)
-	binary.BigEndian.PutUint32(authOps, 0x00000df8) // Or 0x00000df8 if required
+	binary.BigEndian.PutUint32(authOps, 3576) // Or 0x00000df8 if required
 	body = append(body, authOps...)
 
 	// Tagged Fields for this topic
@@ -190,7 +189,7 @@ func processTopicPartitionResponse(connection net.Conn, correlationID uint32, to
 
 	// Final Packet: [Size] + [Correlation ID] + [Body]
 	totalSize := 4 + len(body)
-	response := make([]byte, 4 + totalSize)
+	response := make([]byte, 4+totalSize)
 	binary.BigEndian.PutUint32(response[0:4], uint32(totalSize))
 	binary.BigEndian.PutUint32(response[4:8], correlationID)
 	copy(response[8:], body)
