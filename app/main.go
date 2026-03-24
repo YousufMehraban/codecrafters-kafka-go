@@ -1,3 +1,174 @@
+package main
+
+import (
+	"fmt"
+	"net"
+	"os"
+	"encoding/binary"
+	"io"
+)
+
+// Ensures gofmt doesn't remove the "net" and "os" imports in stage 1 (feel free to remove this!)
+var _ = net.Listen
+var _ = os.Exit
+
+
+
+// func sendResponse(connection net.Conn) error {
+	
+// 	const messageSize uint32 = 4
+// 	const correlationID uint32 = 4
+// 	byteSlice := make([] byte, 8)
+
+// 	binary.BigEndian.PutUint32(byteSlice[0:4], messageSize)
+// 	binary.BigEndian.PutUint32(byteSlice[4:8], correlationID)
+
+// 	_, err := connection.Write(byteSlice)
+
+// 	return err
+// }
+
+// const errorNone int16 = 0
+// const errorApiUnsupportedVersion = 35
+
+const(
+	errorNone int16 = 0
+	errorApiUnsupportedVersion int16 = 35
+)
+
+func processKafkaRequest (connection net.Conn, bodyBuffer []byte){
+
+	
+	apiVersion := int16(binary.BigEndian.Uint16(bodyBuffer[2:4]))
+	correlationID := binary.BigEndian.Uint32(bodyBuffer[4:8])
+
+	if apiVersion < 0 || apiVersion > 4 {
+		sendError(connection, correlationID, errorApiUnsupportedVersion)
+		return
+	}
+
+	sendApiVersionResponse(connection, correlationID)
+
+}
+
+func sendError(connection net.Conn, correlationID uint32, errorCode int16){
+	response := make([] byte, 10)
+	binary.BigEndian.PutUint32(response[0:4], 6)
+	binary.BigEndian.PutUint32(response[4:8], correlationID)
+	binary.BigEndian.PutUint16(response[8:10], uint16(errorCode))
+
+	connection.Write(response)
+}
+
+
+
+func sendApiVersionResponse(connection net.Conn, correlationID uint32){
+
+	body := [] byte {}
+	body = append(body, 0, 0)		// error code, 0 means no error
+	body = append(body, 2)			
+
+	apiKeyBuffer := make([] byte, 6)
+
+	binary.BigEndian.PutUint16(apiKeyBuffer[0:2], 18) // api key
+	binary.BigEndian.PutUint16(apiKeyBuffer[2:4], 0)  // min api version
+	binary.BigEndian.PutUint16(apiKeyBuffer[4:6], 4)  // max api version
+
+	body = append(body, apiKeyBuffer...)    // api key compact array
+	body = append(body, 0) 					// tagged fields
+
+	throttleBuffer := make([] byte, 4) 		// creating a throttle time compact array usually is 0
+	binary.BigEndian.PutUint32(throttleBuffer, 0)
+	throttleBuffer = append(throttleBuffer...)
+
+	body = append(body, throttleBuffer...)		// adding throttle time compact array data into body
+	body = append(body, 0)					// main tagged fields
+
+	// final body packet 
+	// 4 bytes messageSize + 4 bytes correlationID + len(body)
+
+	totalSize := 4 + len(body)				// storing total length of body plus correlationID.
+
+	response := make([] byte, 4 + totalSize)		// creating response slice containing messageSize plus totalSize
+
+	binary.BigEndian.PutUint32(response[0:4], uint32(totalSize))   // setting first 4 bytes of response as messageSize
+	binary.BigEndian.PutUint32(response[4:8], correlationID)		// setting second 4 bytes of response as correlationID
+	copy(response[8:], body)									// setting from 8th bytes to the end as body of response
+
+	connection.Write(response)								// writing/sending response throught the connection
+}
+
+
+func handleClientRequest(connection net.Conn){
+	defer connection.Close()  // close connectiong if when loop breaks
+
+	for{
+		sizeBuffer := make([]byte, 4)
+		_, err := io.ReadFull(connection, sizeBuffer)
+		if err != nil{
+			return 		// exit the loop and close connection
+		}
+		
+		messageSize := binary.BigEndian.Uint32(sizeBuffer)
+		requestBuffer := make([]byte, messageSize)
+		if _, err := io.ReadFull(connection, requestBuffer); err != nil{
+			fmt.Println("Error reading request body", err)
+			return
+		}
+
+		handleKafkaRequest(connection, requestBuffer)
+	}
+}
+
+// func sendResponse(connection net.Conn, correlationID uint32, errorCode uint16){
+// 	res := make([] byte, 8) 			// 4 bytes messageSize plus 4 bytes correlationID
+// 	binary.BigEndian.PutUint32(res[0:4], 4)
+// 	binary.BigEndian.PutUint32(res[4:8], correlationID)
+// 	binary.BigEndian.PutUint16(res[8:10], uint16(errorCode))
+
+// 	connection.Write(res)
+// }
+
+
+
+func main() {
+
+	// l, _ := net.Listen("tcp", "0.0.0.0:9092")
+	// for{
+	// 	connection, _ := l.Accept()
+	// 	go handleKafkaRequest(connection)
+	// }
+
+
+	
+	l, err := net.Listen("tcp", "0.0.0.0:9092")
+	if err != nil {
+		fmt.Println("Failed to bind to port 9092")
+		return
+	}
+	defer l.Close()
+
+	for {
+		connection, err := l.Accept()
+		if err != nil {
+			fmt.Println("Error accepting connection: ", err.Error())
+			continue
+		}
+
+		go handleClientRequest(connection)
+
+		// err = sendResponse(connection)
+		// if err != nil{
+		// 	fmt.Println("Error sending Kafka response", err.Error)
+		// }
+		// connection.Close()
+	}
+}
+
+
+
+
+
 // package main
 
 // import (
@@ -8,28 +179,10 @@
 // 	"io"
 // )
 
-// // Ensures gofmt doesn't remove the "net" and "os" imports in stage 1 (feel free to remove this!)
 // var _ = net.Listen
 // var _ = os.Exit
 
 
-
-// // func sendResponse(connection net.Conn) error {
-	
-// // 	const messageSize uint32 = 4
-// // 	const correlationID uint32 = 4
-// // 	byteSlice := make([] byte, 8)
-
-// // 	binary.BigEndian.PutUint32(byteSlice[0:4], messageSize)
-// // 	binary.BigEndian.PutUint32(byteSlice[4:8], correlationID)
-
-// // 	_, err := connection.Write(byteSlice)
-
-// // 	return err
-// // }
-
-// // const errorNone int16 = 0
-// // const errorApiUnsupportedVersion = 35
 
 // const(
 // 	errorNone int16 = 0
@@ -139,27 +292,9 @@
 // 	}
 // }
 
-// // func sendResponse(connection net.Conn, correlationID uint32, errorCode uint16){
-// // 	res := make([] byte, 8) 			// 4 bytes messageSize plus 4 bytes correlationID
-// // 	binary.BigEndian.PutUint32(res[0:4], 4)
-// // 	binary.BigEndian.PutUint32(res[4:8], correlationID)
-// // 	binary.BigEndian.PutUint16(res[8:10], uint16(errorCode))
-
-// // 	connection.Write(res)
-// // }
 
 
-
-// func main() {
-
-// 	// l, _ := net.Listen("tcp", "0.0.0.0:9092")
-// 	// for{
-// 	// 	connection, _ := l.Accept()
-// 	// 	go handleKafkaRequest(connection)
-// 	// }
-
-
-	
+// func main() {	
 // 	l, err := net.Listen("tcp", "0.0.0.0:9092")
 // 	if err != nil {
 // 		fmt.Println("Failed to bind to port 9092")
@@ -176,86 +311,5 @@
 
 // 		go handleClientRequest(connection)
 
-// 		// err = sendResponse(connection)
-// 		// if err != nil{
-// 		// 	fmt.Println("Error sending Kafka response", err.Error)
-// 		// }
-// 		// connection.Close()
 // 	}
 // }
-
-
-
-
-
-package main
-
-import (
-	"encoding/binary"
-	"fmt"
-	"io"
-	"net"
-)
-
-func main() {
-	l, err := net.Listen("tcp", "0.0.0.0:9092")
-	if err != nil {
-		fmt.Println("Failed to bind to port 9092")
-		return
-	}
-	defer l.Close()
-
-	for {
-		conn, err := l.Accept()
-		if err != nil {
-			fmt.Println("Error accepting connection: ", err)
-			continue
-		}
-
-		// Use a goroutine so one client doesn't block others
-		go handleClient(conn)
-	}
-}
-
-func handleClient(conn net.Conn) {
-	defer conn.Close() // Close connection only when the loop breaks
-
-	for {
-		// 1. Read the 4-byte Message Size
-		sizeBuf := make([]byte, 4)
-		_, err := io.ReadFull(conn, sizeBuf)
-		if err != nil {
-			if err != io.EOF {
-				fmt.Println("Client disconnected or error:", err)
-			}
-			return // Exit the loop and close connection
-		}
-		messageSize := binary.BigEndian.Uint32(sizeBuf)
-
-		// 2. Read the rest of the message
-		requestBuf := make([]byte, messageSize)
-		if _, err := io.ReadFull(conn, requestBuf); err != nil {
-			fmt.Println("Error reading request body:", err)
-			return
-		}
-
-		// 3. Parse and Respond
-		// Offset 0-1: API Key, Offset 2-3: Version, Offset 4-7: Correlation ID
-		correlationID := binary.BigEndian.Uint32(requestBuf[4:8])
-		
-		fmt.Printf("Processing request with Correlation ID: %d\n", correlationID)
-		
-		// Send the response back
-		sendResponse(conn, correlationID)
-		
-		// The loop continues, waiting for the NEXT request on the same 'conn'
-	}
-}
-
-func sendResponse(conn net.Conn, correlationID uint32) {
-	// Response: [4 bytes Size] + [4 bytes CorrelationID]
-	res := make([]byte, 8)
-	binary.BigEndian.PutUint32(res[0:4], 4)
-	binary.BigEndian.PutUint32(res[4:8], correlationID)
-	conn.Write(res)
-}
