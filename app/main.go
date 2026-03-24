@@ -111,6 +111,41 @@ func sendApiVersionResponse(connection net.Conn, correlationID uint32){
 }
 
 
+func handleClientRequest(connection net.Conn){
+	defer connection.Close()  // close connectiong if when loop breaks
+
+	for{
+		sizeBuffer := make([]byte, 4)
+		_, err := io.ReadFull(connection, sizeBuffer)
+		if err != nil{
+			if err != io.EOF{
+				fmt.Println("Client disconnected or error", err)
+			}
+			return 		// exit the loop and close connection
+		}
+		
+		messageSize := binary.BigEndian.Uint32(sizeBuffer)
+		requestBuffer := make([]byte, messageSize)
+		if _, err := io.ReadFull(connection, requestBuffer); err != nil{
+			fmt.Println("Error reading request body", err)
+			return
+		}
+
+		correlationID := binary.BigEndian.Uint32(requestBuffer[4:8])
+		fmt.Printf("Processing request with correlationID %d\n", correlationID)
+
+		sendResponse(connection, correlationID)
+	}
+}
+
+func sendResponse(connection net.Conn, correlationID uint32){
+	res := make([] byte, 8) 			// 4 bytes messageSize plus 4 bytes correlationID
+	binary.BigEndian.PutUint32(res[0:4], 4)
+	binary.BigEndian.PutUint32(res[4:8], correlationID)
+
+	connection.Write(res)
+}
+
 
 
 func main() {
@@ -122,15 +157,6 @@ func main() {
 	// }
 
 
-
-
-
-
-
-	// You can use print statements as follows for debugging, they'll be visible when running tests.
-	fmt.Println("Logs from your program will appear here!")
-
-	// TODO: Uncomment the code below to pass the first stage
 	
 	l, err := net.Listen("tcp", "0.0.0.0:9092")
 	if err != nil {
@@ -146,7 +172,7 @@ func main() {
 			continue
 		}
 
-		go handleKafkaRequest(connection)
+		go handleClientRequest(connection)
 
 		// err = sendResponse(connection)
 		// if err != nil{
