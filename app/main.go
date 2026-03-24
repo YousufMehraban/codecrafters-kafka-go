@@ -38,16 +38,30 @@ const(
 
 func processKafkaRequest (connection net.Conn, bodyBuffer []byte){
 
-	
-	apiVersion := int16(binary.BigEndian.Uint16(bodyBuffer[2:4]))
-	correlationID := binary.BigEndian.Uint32(bodyBuffer[4:8])
+    // first 2 bytes is API Key
+    apiKey := int16(binary.BigEndian.Uint16(bodyBuffer[0:2]))
+    // second 2 bytes are API Version
+    apiVersion := int16(binary.BigEndian.Uint16(bodyBuffer[2:4]))
+    // index 4 to 7 the third 4 bytes are Correlation ID
+    correlationID := binary.BigEndian.Uint32(bodyBuffer[4:8])
 
-	if apiVersion < 0 || apiVersion > 4 {
-		sendError(connection, correlationID, errorApiUnsupportedVersion)
-		return
-	}
+    // Check for valid version first
+    if apiVersion < 0 || apiVersion > 4 {
+        sendError(connection, correlationID, errorApiUnsupportedVersion)
+        return
+    }
 
-	sendApiVersionResponse(connection, correlationID)
+    // Route based on API Key and each case is API versions
+    switch apiKey {
+    case 18: // ApiVersions
+        sendApiVersionResponse(connection, correlationID)
+    case 75: // DescribeTopicPartitions
+        // For now, you can hardcode a topic name like "unknown_topic" 
+        // until you implement the code to parse it from the request body.
+        sendDescribeTopicPartitionsResponse(connection, correlationID, "some_topic")
+    default:
+        fmt.Printf("Unsupported API Key: %d\n", apiKey)
+    }
 
 }
 
@@ -126,6 +140,58 @@ func handleClientRequest(connection net.Conn){
 
 		processKafkaRequest(connection, requestBuffer)
 	}
+}
+
+
+func processTopicPartitionResponse(connection net.Conn, correlationID uint32, topicName string){
+	body := []byte {}
+
+	throttle := make([] byte, 4) 			// throttle time 4 bytes
+	binary.BigEndian.PutUint32(throttle, 0)
+	body = append(body, throttle...)
+
+	body = append(body, 2)			// Topic
+
+	topicError := make([] byte, 2)			//topic error, error code 3 for UNKNOWN TOPIC OR PARTITION
+	binary.BigEndian.PutUint16(topicError, 3)
+	body = append(body, topicError...)
+
+	// Topic Name (Compact String: length+1 followed by string)
+	body = append(body, byte(len(topicName)+1))
+	body = append(body, []byte(topicName)...)
+
+	// Topic ID (16 bytes of zeros for unknown topic)
+	body = append(body, make([]byte, 16)...)
+
+	// Is Internal (1 byte)
+	body = append(body, 0)
+
+	// Partitions Array (Compact: 0 partitions, so length is 0 + 1 = 1)
+	body = append(body, 1)
+
+	// Topic Authorized Operations (4 bytes)
+	authOps := make([]byte, 4)
+	binary.BigEndian.PutUint32(authOps, 0) // Or 0x00000df8 if required
+	body = append(body, authOps...)
+
+	// Tagged Fields for this topic
+	body = append(body, 0)
+
+	// 3. Next Cursor (1 byte) - 0xff indicates null/no cursor
+	body = append(body, 0xff)
+
+	// 4. Main Tagged Fields
+	body = append(body, 0)
+
+	// Final Packet: [Size] + [Correlation ID] + [Body]
+	totalSize := 4 + len(body)
+	response := make([]byte, 4+totalSize)
+	binary.BigEndian.PutUint32(response[0:4], uint32(totalSize))
+	binary.BigEndian.PutUint32(response[4:8], correlationID)
+	copy(response[8:], body)
+
+	conn.Write(response)
+
 }
 
 
