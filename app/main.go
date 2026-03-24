@@ -209,18 +209,55 @@ func processTopicPartitionResponse(connection net.Conn, correlationID uint32, to
 	// 2. Topics Array (Compact: 1 topic + 1 = 2)
 	body = append(body, 2)
 
-	// -- Topic Object --
-	topicErr := make([]byte, 2)
-	binary.BigEndian.PutUint16(topicErr, 3) // UNKNOWN_TOPIC_OR_PARTITION
-	body = append(body, topicErr...)
+	// // -- Topic Object --
+	// topicErr := make([]byte, 2)
+	// binary.BigEndian.PutUint16(topicErr, 3) // UNKNOWN_TOPIC_OR_PARTITION
+	// body = append(body, topicErr...)
+
+	body = append(body, 0, 0) // topic start ojb; error code 0 means success
 
 	// Topic Name (Compact String)
 	body = append(body, byte(len(topicName)+1))
 	body = append(body, []byte(topicName)...)
 
-	body = append(body, make([]byte, 16)...) // Topic ID (zeros)
-	body = append(body, 0)                   // Is Internal
-	body = append(body, 1)                   // Partitions Array (0+1=1)
+	// body = append(body, make([]byte, 16)...) // Topic ID (zeros)
+	// body = append(body, 0)                   // Is Internal
+	// body = append(body, 1)                   // Partitions Array (0+1=1)
+
+	// Topic ID (Use a fixed 16-byte UUID for a found topic)
+	topicID := []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10}
+	body = append(body, topicID...)
+	body = append(body, 0)		// 0 internal bool false
+	body = append(body, 2)		// 1 partition equals to len of 2
+
+	body = append(body, 0, 0)	// partition error code 2 bytes
+
+	//partition index array 4 bytes
+	partitionIndex := make([] byte, 4)
+	binary.BigEndian.PutUint32(partitionIndex, 0)
+	body = append(body, partitionIndex...)
+
+	//leader id 4 bytes
+	leaderID := make([] byte, 4)
+	binary.BigEndian.PutUint32(leaderID, 1)  	// assuming your borker id is 1
+	body = append(body, leaderID...)
+
+	//leader epoch 4 bytes
+	body = append(body, 0,0,0,0)
+
+	// Replicas (Compact Array: length 2, node ID 1)
+	body = append(body, 2, 0, 0, 0, 1)
+	// ISR Nodes (Compact Array: length 2, node ID 1)
+	body = append(body, 2, 0, 0, 0, 1)
+
+	// Remaining Arrays (Empty Compact Arrays = length 1)
+	body = append(body, 1) // ELR
+	body = append(body, 1) // Last Known ELR
+	body = append(body, 1) // Offline Replicas
+
+	body = append(body, 0) // Tagged Fields for Partition
+	// --- End Partitions Array ---
+
 
 	authOps := make([]byte, 4)
 	binary.BigEndian.PutUint32(authOps, 3576) // 0x00000df8 (standard for this stage)
