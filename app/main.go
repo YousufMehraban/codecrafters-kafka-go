@@ -79,16 +79,13 @@ func sendApiVersionResponse(connection net.Conn, correlationID uint32){
 
 	throttleBuffer := make([] byte, 4) 		// creating a throttle time compact array usually is 0
 	binary.BigEndian.PutUint32(throttleBuffer, 0)
-	throttleBuffer = append(throttleBuffer...)
-
 	body = append(body, throttleBuffer...)		// adding throttle time compact array data into body
+	
 	body = append(body, 0)					// main tagged fields
 
-	// final body packet 
+	// final body packet or final response
 	// 4 bytes messageSize + 4 bytes correlationID + len(body)
-
 	totalSize := 4 + len(body)				// storing total length of body plus correlationID.
-
 	response := make([] byte, 4 + totalSize)		// creating response slice containing messageSize plus totalSize
 
 	binary.BigEndian.PutUint32(response[0:4], uint32(totalSize))   // setting first 4 bytes of response as messageSize
