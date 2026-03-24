@@ -132,21 +132,21 @@ func handleClientRequest(connection net.Conn){
 		}
 
 		correlationID := binary.BigEndian.Uint32(requestBuffer[4:8])
-		errorCode := binary.BigEndian.Uint16(requestBuffer[8:10])
+		// errorCode := binary.BigEndian.Uint16(requestBuffer[8:10])
 		fmt.Printf("Processing request with correlationID %d\n", correlationID)
 
-		sendResponse(connection, correlationID, errorCode)
+		sendApiVersionResponse(connection, correlationID)
 	}
 }
 
-func sendResponse(connection net.Conn, correlationID uint32, errorCode uint16){
-	res := make([] byte, 8) 			// 4 bytes messageSize plus 4 bytes correlationID
-	binary.BigEndian.PutUint32(res[0:4], 4)
-	binary.BigEndian.PutUint32(res[4:8], correlationID)
-	binary.BigEndian.PutUint16(res[8:10], uint16(errorCode))
+// func sendResponse(connection net.Conn, correlationID uint32, errorCode uint16){
+// 	res := make([] byte, 8) 			// 4 bytes messageSize plus 4 bytes correlationID
+// 	binary.BigEndian.PutUint32(res[0:4], 4)
+// 	binary.BigEndian.PutUint32(res[4:8], correlationID)
+// 	binary.BigEndian.PutUint16(res[8:10], uint16(errorCode))
 
-	connection.Write(res)
-}
+// 	connection.Write(res)
+// }
 
 
 
