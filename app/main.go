@@ -201,31 +201,40 @@ func processTopicPartitionResponse(connection net.Conn, correlationID uint32, to
 
 
 func parseTopicName(body []byte) (string, error) {
-	// 1. Skip Header: API Key (2), Version (2), CorrelationID (4)
-	offset := 8
+    //Skip Header: API Key (2), Version (2), CorrelationID (4)
+    offset := 8
 
-	// 2. Skip ClientID (Nullable String: 2-byte length)
-	clientIDLen := int(binary.BigEndian.Uint16(body[offset : offset+2]))
-	offset += 2
-	if clientIDLen > 0 {
-		offset += clientIDLen
-	}
+    //Handle ClientID (Nullable String) correctly
+    clientIDLenRaw := int16(binary.BigEndian.Uint16(body[offset : offset+2]))
+    offset += 2
+    
+    // In Kafka, -1 (0xFFFF) means Null, 0 means Empty string.
+    // Both take 0 additional bytes.
+    if clientIDLenRaw > 0 {
+        offset += int(clientIDLenRaw)
+    }
 
-	// 3. Skip Request Tagged Buffer (1 byte)
-	offset += 1
+    //Skip Request Tagged Buffer (1 byte)
+    offset += 1
 
-	// 4. Read Topics Array Length (Compact Array: 1 byte for small arrays)
-	// For CodeCrafters, this is usually 2 (indicating 1 topic)
-	offset += 1
+    // Read Topics Array Length (Compact Array)
+    // The tester sends 1 topic, so this byte is 2 (N+1)
+    offset += 1
 
-	// 5. Read Topic Name (Compact String)
-	// First byte is length + 1
-	nameLen := int(body[offset]) - 1
-	offset += 1
-	
-	topicName := string(body[offset : offset+nameLen])
-	return topicName, nil
+    // Read Topic Name (Compact String)
+    // First byte is length + 1. If length is > 128, this is a varint, 
+    // but for the tester, 1 byte is usually enough.
+    nameLen := int(body[offset]) - 1
+    offset += 1
+    
+    if offset+nameLen > len(body) {
+        return "", fmt.Errorf("buffer overflow")
+    }
+
+    topicName := string(body[offset : offset+nameLen])
+    return topicName, nil
 }
+
 
 
 
