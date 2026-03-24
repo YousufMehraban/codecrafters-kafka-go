@@ -58,8 +58,6 @@ func handleKafkaRequest (connection net.Conn){
 	if apiVersion < 0 || apiVersion > 4 {
 		sendError(connection, correlationID, errorApiUnsupportedVersion)
 		return
-	} else {
-		sendError(connection, correlationID, errorNone)
 	}
 
 	sendApiVersionResponse(connection, correlationID)
