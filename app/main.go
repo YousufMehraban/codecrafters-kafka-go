@@ -137,7 +137,7 @@ func main() {
 		fmt.Println("Failed to bind to port 9092")
 		return
 	}
-	dffer l.Close()
+	defer l.Close()
 
 	for {
 		connection, err := l.Accept()
