@@ -67,7 +67,7 @@ func processKafkaRequest (connection net.Conn, bodyBuffer []byte){
 
 		// 3. Topics Array: [Array Length (VarInt)]
 		// Use Uvarint to read the compact array length
-		arrayLen, n := binary.Uvarint(bodyBuffer[currentPos:])
+		_, n := binary.Uvarint(bodyBuffer[currentPos:])
 		currentPos += n
 
 		// 4. Topic Name: [Name Length (VarInt)] + [Name Content]
