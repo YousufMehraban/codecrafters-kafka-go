@@ -57,16 +57,17 @@ func processKafkaRequest (connection net.Conn, bodyBuffer []byte){
     case 18: // ApiVersions
         sendApiVersionResponse(connection, correlationID)
     case 75: // DescribeTopicPartitions
-		topicName, err := parseTopicName(bodyBuffer)
+		topicName, nameEndIndex, err := parseTopicNameWithEnd(bodyBuffer)
 		if err != nil{
 			fmt.Println("Error parsing topic name", err)
 			return
 		}
-		
-		expectedUUID, _ := hex.DecodeString("71a59a5189684f8b937e754e9c2593eb")
+
+		UUIDStart := nameEndIndex+ 1
+		topicID := bodyBuffer[UUIDStart : UUIDStart+16]
         // For now, you can hardcode a topic name like "unknown_topic" 
         // until you implement the code to parse it from the request body.
-        processTopicPartitionResponse(connection, correlationID, topicName, expectedUUID)
+        processTopicPartitionResponse(connection, correlationID, topicName, topicID)
     default:
         fmt.Printf("Unsupported API Key: %d\n", apiKey)
     }
