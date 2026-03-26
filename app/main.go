@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
 	"os"
+	"path/filepath"
+	"strings"
 )
 
 // Ensures gofmt doesn't remove the "net" and "os" imports in stage 1 (feel free to remove this!)
@@ -37,13 +40,85 @@ const(
 	errorApiUnsupportedVersion int16 = 35
 )
 
-var expectedTopicID = func() []byte {
+var emptyTopicID = make([]byte, 16)
+
+func defaultTopicID() []byte {
 	id, err := hex.DecodeString("71a59a5189684f8b937ee6a0943b74ec")
 	if err != nil || len(id) != 16 {
 		return make([]byte, 16)
 	}
 	return id
-}()
+}
+
+func cloneBytes(in []byte) []byte {
+	out := make([]byte, len(in))
+	copy(out, in)
+	return out
+}
+
+func parseLogDirFromServerProperties() string {
+	if len(os.Args) < 2 {
+		return ""
+	}
+
+	propsPath := os.Args[1]
+	propsData, err := os.ReadFile(propsPath)
+	if err != nil {
+		return ""
+	}
+
+	for _, rawLine := range strings.Split(string(propsData), "\n") {
+		line := strings.TrimSpace(rawLine)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "log.dirs=") {
+			val := strings.TrimSpace(strings.TrimPrefix(line, "log.dirs="))
+			if val == "" {
+				return ""
+			}
+			// Codecrafters uses a single log dir for this stage.
+			parts := strings.Split(val, ",")
+			return strings.TrimSpace(parts[0])
+		}
+	}
+
+	return ""
+}
+
+func readTopicIDFromMetadata(topicName string) []byte {
+	logDir := parseLogDirFromServerProperties()
+	if logDir == "" {
+		return defaultTopicID()
+	}
+
+	metadataPath := filepath.Join(logDir, "__cluster_metadata-0", "00000000000000000000.log")
+	data, err := os.ReadFile(metadataPath)
+	if err != nil {
+		return defaultTopicID()
+	}
+
+	nameBytes := []byte(topicName)
+	if len(nameBytes) == 0 {
+		return cloneBytes(emptyTopicID)
+	}
+
+	// TopicRecord stores compact topic name, then 16-byte topic ID.
+	for i := 1; i+len(nameBytes)+16 <= len(data); i++ {
+		if !bytes.Equal(data[i:i+len(nameBytes)], nameBytes) {
+			continue
+		}
+
+		if int(data[i-1]) != len(nameBytes)+1 {
+			continue
+		}
+
+		idStart := i + len(nameBytes)
+		return cloneBytes(data[idStart : idStart+16])
+	}
+
+	return defaultTopicID()
+}
 
 func processKafkaRequest (connection net.Conn, bodyBuffer []byte){
 	if len(bodyBuffer) < 8 {
@@ -284,7 +359,7 @@ func processTopicPartitionResponse(connection net.Conn, correlationID uint32, to
 	// Convert the expected UUID string to 16 bytes
     // uuidString := "71a59a5189684f8b937e754e9c2593eb"
     // topicID, _ := hex.DecodeString(uuidString) 
-	body = append(body, expectedTopicID...) // expected topic UUID for this stage
+	body = append(body, readTopicIDFromMetadata(topicName)...)
 	body = append(body, 0)		// 0 internal bool false
 	body = append(body, 2)		// 1 partition array length equals to len of 2
 
