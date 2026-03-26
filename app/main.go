@@ -277,7 +277,7 @@ func processTopicPartitionResponse(connection net.Conn, correlationID uint32, to
 	// --- FINAL ASSEMBLY (The Critical Part) ---
 	// totalSize is CorrelationID (4) + header tagged field size 1 byte + len of body
 	headerTaggedFieldSize := 1
-	totalSize := 4 + headerTaggedFieldSize+ len(body)
+	totalSize := 4 + headerTaggedFieldSize + len(body)
 	response := make([]byte, 4 + totalSize)        // messageSize + totalSize
 
 	// Bytes 0-3: Total Message Size
@@ -328,6 +328,27 @@ func parseTopicName(body []byte) (string, error) {
 }
 
 
+// parseTopicNameWithEnd returns the topic name and the index where it ends in the buffer.
+func parseTopicNameWithEnd(buffer []byte) (string, int, error) {
+    // 1. Skip the topics array length (1 byte for a compact array of 1 topic)
+    // 2. Read the Compact String length (VarInt)
+    length, n := binary.Uvarint(buffer[0:]) 
+    if n <= 0 {
+        return "", 0, fmt.Errorf("failed to read string length")
+    }
+
+    // Kafka Compact Strings use length + 1
+    actualLength := int(length) - 1
+    if actualLength < 0 {
+        return "", n, nil // Null string case
+    }
+
+    nameStart := n
+    nameEnd := n + actualLength
+    topicName := string(buffer[nameStart:nameEnd])
+
+    return topicName, nameEnd, nil
+}
 
 
 func main() {
