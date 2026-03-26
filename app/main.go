@@ -62,7 +62,8 @@ func processKafkaRequest (connection net.Conn, bodyBuffer []byte){
 			fmt.Println("Error parsing topic name", err)
 			return
 		}
-		expectedUUID := hex.DecodeString("71a59a5189684f8b937e754e9c2593eb")
+		
+		expectedUUID, _ := hex.DecodeString("71a59a5189684f8b937e754e9c2593eb")
         // For now, you can hardcode a topic name like "unknown_topic" 
         // until you implement the code to parse it from the request body.
         processTopicPartitionResponse(connection, correlationID, topicName, expectedUUID)
