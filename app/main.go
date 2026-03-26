@@ -332,9 +332,9 @@ func parseTopicName(body []byte) (string, error) {
 func parseTopicNameWithEnd(buffer []byte) (string, int, error) {
     // 1. Skip the topics array length (1 byte for a compact array of 1 topic)
     // 2. Read the Compact String length (VarInt)
-    length, n := binary.Uvarint(buffer[0:]) 
+    length, n := binary.Uvarint(buffer) 
     if n <= 0 {
-        return "", 0, fmt.Errorf("failed to read string length")
+        return "", 0, fmt.Errorf("invalid varint")
     }
 
     // Kafka Compact Strings use length + 1
@@ -343,11 +343,9 @@ func parseTopicNameWithEnd(buffer []byte) (string, int, error) {
         return "", n, nil // Null string case
     }
 
-    nameStart := n
-    nameEnd := n + actualLength
-    topicName := string(buffer[nameStart:nameEnd])
+    topicName := string(buffer[n : n + actualLength])
 
-    return topicName, nameEnd, nil
+    return topicName, n+actualLength, nil
 }
 
 
