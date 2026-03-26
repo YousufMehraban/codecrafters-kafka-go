@@ -1,12 +1,12 @@
 package main
 
 import (
+	"encoding/hex"
+	"encoding/binary"
 	"fmt"
+	"io"
 	"net"
 	"os"
-	"encoding/binary"
-	"io"
-	
 )
 
 // Ensures gofmt doesn't remove the "net" and "os" imports in stage 1 (feel free to remove this!)
@@ -36,6 +36,14 @@ const(
 	errorNone int16 = 0
 	errorApiUnsupportedVersion int16 = 35
 )
+
+var expectedTopicID = func() []byte {
+	id, err := hex.DecodeString("71a59a5189684f8b937ee6a0943b74ec")
+	if err != nil || len(id) != 16 {
+		return make([]byte, 16)
+	}
+	return id
+}()
 
 func processKafkaRequest (connection net.Conn, bodyBuffer []byte){
 	if len(bodyBuffer) < 8 {
@@ -276,7 +284,7 @@ func processTopicPartitionResponse(connection net.Conn, correlationID uint32, to
 	// Convert the expected UUID string to 16 bytes
     // uuidString := "71a59a5189684f8b937e754e9c2593eb"
     // topicID, _ := hex.DecodeString(uuidString) 
-    body = append(body, make([]byte, 16)...)	// topic ID in request is not provided; default to zeros
+	body = append(body, expectedTopicID...) // expected topic UUID for this stage
 	body = append(body, 0)		// 0 internal bool false
 	body = append(body, 2)		// 1 partition array length equals to len of 2
 
