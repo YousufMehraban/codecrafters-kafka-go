@@ -38,6 +38,9 @@ const(
 )
 
 func processKafkaRequest (connection net.Conn, bodyBuffer []byte){
+	if len(bodyBuffer) < 8 {
+		return
+	}
 
     // first 2 bytes is API Key
     apiKey := int16(binary.BigEndian.Uint16(bodyBuffer[0:2]))
@@ -57,29 +60,58 @@ func processKafkaRequest (connection net.Conn, bodyBuffer []byte){
     case 18: // ApiVersions
         sendApiVersionResponse(connection, correlationID)
     case 75: // DescribeTopicPartitions
+		if len(bodyBuffer) < 10 {
+			return
+		}
+
 		// 1. Skip Client ID: [Length (2 bytes)] + [String Content]
-		clientIDLen := int(binary.BigEndian.Uint16(bodyBuffer[8:10]))
-		// If clientID is null, length is -1 (0xFFFF), but usually it's present.
-		currentPos := 10 + clientIDLen 
-		
-		// 2. Skip Request Tag Buffer (1 byte)
-		currentPos += 1
+		// Kafka nullable string uses -1 for null.
+		clientIDLen := int(int16(binary.BigEndian.Uint16(bodyBuffer[8:10])))
+		currentPos := 10
+		if clientIDLen > 0 {
+			currentPos += clientIDLen
+		}
+		if currentPos >= len(bodyBuffer) {
+			return
+		}
 
-		// 3. Topics Array: [Array Length (VarInt)]
-		// Use Uvarint to read the compact array length
+		// 2. Skip request header tagged fields (uvarint)
 		_, n := binary.Uvarint(bodyBuffer[currentPos:])
+		if n <= 0 {
+			return
+		}
 		currentPos += n
+		if currentPos >= len(bodyBuffer) {
+			return
+		}
 
-		// 4. Topic Name: [Name Length (VarInt)] + [Name Content]
+		// 3. Topics compact array length (uvarint)
+		_, n = binary.Uvarint(bodyBuffer[currentPos:])
+		if n <= 0 {
+			return
+		}
+		currentPos += n
+		if currentPos >= len(bodyBuffer) {
+			return
+		}
+
+		// 4. Topic object -> name (compact string)
 		topicName, nameEnd, err := parseTopicNameWithEnd(bodyBuffer[currentPos:])
 		if err != nil {
 			return
 		}
+		currentPos += nameEnd
+		if currentPos >= len(bodyBuffer) {
+			return
+		}
 
-		// 5. Extract UUID (16 bytes after Name and its Tag Buffer)
-		uuidStart := currentPos + nameEnd + 1 
-		topicID := bodyBuffer[uuidStart : uuidStart+16]
-        processTopicPartitionResponse(connection, correlationID, topicName, topicID)
+		// 5. Skip topic tagged fields (uvarint)
+		_, n = binary.Uvarint(bodyBuffer[currentPos:])
+		if n <= 0 {
+			return
+		}
+
+        processTopicPartitionResponse(connection, correlationID, topicName)
     default:
         fmt.Printf("Unsupported API Key: %d\n", apiKey)
     }
@@ -214,7 +246,7 @@ func handleClientRequest(connection net.Conn){
 
 // }
 
-func processTopicPartitionResponse(connection net.Conn, correlationID uint32, topicName string, topicID []byte) {
+func processTopicPartitionResponse(connection net.Conn, correlationID uint32, topicName string) {
 	body := []byte{}
 
 	// 1. Throttle Time (4 bytes)
@@ -244,7 +276,7 @@ func processTopicPartitionResponse(connection net.Conn, correlationID uint32, to
 	// Convert the expected UUID string to 16 bytes
     // uuidString := "71a59a5189684f8b937e754e9c2593eb"
     // topicID, _ := hex.DecodeString(uuidString) 
-    body = append(body, topicID...)		// appending the topicID
+    body = append(body, make([]byte, 16)...)	// topic ID in request is not provided; default to zeros
 	body = append(body, 0)		// 0 internal bool false
 	body = append(body, 2)		// 1 partition array length equals to len of 2
 
@@ -355,6 +387,9 @@ func parseTopicNameWithEnd(buffer []byte) (string, int, error) {
         return "", n, nil // Null string case
     }
 
+	if n+actualLength > len(buffer) {
+		return "", 0, fmt.Errorf("buffer overflow while parsing topic name")
+	}
     topicName := string(buffer[n : n + actualLength])
 
     return topicName, n+actualLength, nil
