@@ -62,9 +62,10 @@ func processKafkaRequest (connection net.Conn, bodyBuffer []byte){
 			fmt.Println("Error parsing topic name", err)
 			return
 		}
+		expectedUUID := hex.DecodeString("71a59a5189684f8b937e754e9c2593eb")
         // For now, you can hardcode a topic name like "unknown_topic" 
         // until you implement the code to parse it from the request body.
-        processTopicPartitionResponse(connection, correlationID, topicName)
+        processTopicPartitionResponse(connection, correlationID, topicName, expectedUUID)
     default:
         fmt.Printf("Unsupported API Key: %d\n", apiKey)
     }
@@ -199,7 +200,7 @@ func handleClientRequest(connection net.Conn){
 
 // }
 
-func processTopicPartitionResponse(connection net.Conn, correlationID uint32, topicName string) {
+func processTopicPartitionResponse(connection net.Conn, correlationID uint32, topicName string, topicID []byte) {
 	body := []byte{}
 
 	// 1. Throttle Time (4 bytes)
@@ -227,11 +228,11 @@ func processTopicPartitionResponse(connection net.Conn, correlationID uint32, to
 
     // Expected UUID: 71a59a51-8968-4f8b-937e-754e9c2593eb
 	// Convert the expected UUID string to 16 bytes
-    uuidString := "71a59a5189684f8b937e754e9c2593eb"
-    topicID, _ := hex.DecodeString(uuidString) 
-    body = append(body, topicID...)
+    // uuidString := "71a59a5189684f8b937e754e9c2593eb"
+    // topicID, _ := hex.DecodeString(uuidString) 
+    body = append(body, topicID...)		// appending the topicID
 	body = append(body, 0)		// 0 internal bool false
-	body = append(body, 2)		// 1 partition equals to len of 2
+	body = append(body, 2)		// 1 partition array length equals to len of 2
 
 	body = append(body, 0, 0)	// partition error code 2 bytes
 
