@@ -339,9 +339,9 @@ func handleClientRequest(connection net.Conn){
 			// Read Topic Name (Compact String)
 			nameLen, n := binary.Uvarint(requestBuf[curr:])
 			curr += n
-			topicName := string(requestBuf[curr : curr+int(nameLen)-1])
+			topicName := string(requestBuffer[curr : curr+int(nameLen)-1])
 
-			processTopicPartitionResponse(conn, correlationID, topicName)
+			processTopicPartitionResponse(connection, correlationID, topicName)
 		}
 
 	}
