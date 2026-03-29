@@ -376,9 +376,11 @@ func sendApiVersionResponse(connection net.Conn, correlationID uint32, apiVersio
 	var b bytes.Buffer
 
 	if apiVersion < 0 || apiVersion > 4 {
-        b = append(b, 0, 35) // error code 35: UNSUPPORTED_VERSION
+		binary.Write(&b, 0, errorApiUnsupportedVersion)
+        // b = append(b, 0, 35) // error code 35: UNSUPPORTED_VERSION
     } else {
-        b = append(b, 0, 0)  // error code 0: No error
+		binary.Write(&b, 0, errorNone)
+        // b = append(b, 0, 0)  // error code 0: No error
     }
 
 	binary.Write(&b, binary.BigEndian, correlationID)
