@@ -327,17 +327,17 @@ func handleClientRequest(connection net.Conn){
 		case 75:
 			// Manual skip of header to find Topic Name
 			curr := 8
-			clientIDLen := int(int16(binary.BigEndian.Uint16(requestBuf[curr : curr+2])))
+			clientIDLen := int(int16(binary.BigEndian.Uint16(requestBuffer[curr : curr+2])))
 			if clientIDLen > 0 { curr += clientIDLen }
 			curr += 2 // clientID length field
 			curr++    // tag buffer
 
 			// Read Topics Array Length (Compact)
-			_, n := binary.Uvarint(requestBuf[curr:])
+			_, n := binary.Uvarint(requestBuffer[curr:])
 			curr += n
 
 			// Read Topic Name (Compact String)
-			nameLen, n := binary.Uvarint(requestBuf[curr:])
+			nameLen, n := binary.Uvarint(requestBuffer[curr:])
 			curr += n
 			topicName := string(requestBuffer[curr : curr+int(nameLen)-1])
 
