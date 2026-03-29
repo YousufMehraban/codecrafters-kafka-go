@@ -36,7 +36,7 @@ var _ = os.Exit
 
 const(
 	errorNone int16 = 0
-	errorUnknownTopic int16  3
+	errorUnknownTopic int16 = 3
 	errorApiUnsupportedVersion int16 = 35
 )
 
