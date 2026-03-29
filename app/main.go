@@ -94,12 +94,35 @@ func defaultTopicID() []byte {
 
 
 func parseLogDirectory() string {
-	for i, arg := range os.Args{
-		if arg == "--log-dirs" && i+1 < len(os.Args) {
-			return os.Args[i+1]
+	if len(os.Args) < 2 {
+		// Fallback if no config file is provided
+		return "/tmp/kafka-logs"
+	}
+	
+	// CodeCrafters passes the properties file path as the first argument
+	propsPath := os.Args[1]
+	data, err := os.ReadFile(propsPath)
+	if err != nil {
+		return "/tmp/kafka-logs"
+	}
+
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "log.dirs=") {
+			value := strings.TrimPrefix(line, "log.dirs=")
+			// Handle potential CSV values, take the first one
+			if parts := strings.Split(value, ","); len(parts) > 0 {
+				return strings.TrimSpace(parts[0])
+			}
+			return value
 		}
 	}
 	return "/tmp/kafka-logs"
+}
+
+func zeroUUID() []byte {
+	return make([]byte, 16)
 }
 
 
