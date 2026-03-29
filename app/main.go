@@ -427,6 +427,87 @@ func sendError(connection net.Conn, correlationID uint32, errorCode int16){
 // }
 
 
+// func sendApiVersionResponse(connection net.Conn, correlationID uint32, apiVersion int16) {
+// 	var b bytes.Buffer
+
+// 	binary.Write(&b, binary.BigEndian, correlationID)
+// 	if apiVersion < 0 || apiVersion > 4 {
+// 		binary.Write(&b, binary.BigEndian, errorApiUnsupportedVersion)
+//         // b = append(b, 0, 35) // error code 35: UNSUPPORTED_VERSION
+//     } else {
+// 		binary.Write(&b, binary.BigEndian, errorNone)
+//         // b = append(b, 0, 0)  // error code 0: No error
+//     }
+	
+// 	b.WriteByte(3) // API Keys count + 1
+// 	// ApiVersions (18)
+// 	binary.Write(&b, binary.BigEndian, int16(18)); binary.Write(&b, binary.BigEndian, int16(0)); binary.Write(&b, binary.BigEndian, int16(4)); b.WriteByte(0)
+// 	// DescribeTopicPartitions (75)
+// 	binary.Write(&b, binary.BigEndian, int16(75)); binary.Write(&b, binary.BigEndian, int16(0)); binary.Write(&b, binary.BigEndian, int16(0)); b.WriteByte(0)
+
+// 	binary.Write(&b, binary.BigEndian, uint32(0)) // Throttle
+// 	b.WriteByte(0) // Tagged
+
+// 	final := make([]byte, 4+b.Len())
+// 	binary.BigEndian.PutUint32(final[0:4], uint32(b.Len()))
+// 	copy(final[4:], b.Bytes())
+// 	connection.Write(final)
+// }
+
+
+func sendApiVersionResponse(connection net.Conn, correlationID uint32, apiVersion int16) {
+	var b bytes.Buffer
+
+	// 1. Header: Correlation ID (4 bytes)
+	// ApiVersionsResponse ALWAYS uses a v0 header (no tag buffer in header)
+	binary.Write(&b, binary.BigEndian, correlationID)
+
+	// 2. Body: Error Code (int16)
+	if apiVersion < 0 || apiVersion > 4 {
+		binary.Write(&b, binary.BigEndian, int16(35)) // UNSUPPORTED_VERSION
+	} else {
+		binary.Write(&b, binary.BigEndian, int16(0))  // NO_ERROR
+	}
+
+	// 3. API Keys Array (Compact Array: N + 1)
+	// We are sending 3 keys (1, 18, 75), so length is 4.
+	b.WriteByte(4)
+
+	// --- ApiKey 1: FETCH ---
+	binary.Write(&b, binary.BigEndian, int16(1))  // API Key
+	binary.Write(&b, binary.BigEndian, int16(0))  // Min Version
+	binary.Write(&b, binary.BigEndian, int16(16)) // Max Version (at least 16)
+	b.WriteByte(0)                                // Tag Buffer (per entry)
+
+	// --- ApiKey 18: API_VERSIONS ---
+	binary.Write(&b, binary.BigEndian, int16(18)) // API Key
+	binary.Write(&b, binary.BigEndian, int16(0))  // Min Version
+	binary.Write(&b, binary.BigEndian, int16(4))  // Max Version
+	b.WriteByte(0)                                // Tag Buffer
+
+	// --- ApiKey 75: DESCRIBE_TOPIC_PARTITIONS ---
+	binary.Write(&b, binary.BigEndian, int16(75)) // API Key
+	binary.Write(&b, binary.BigEndian, int16(0))  // Min Version
+	binary.Write(&b, binary.BigEndian, int16(0))  // Max Version
+	b.WriteByte(0)                                // Tag Buffer
+
+	// 4. Throttle Time (int32)
+	binary.Write(&b, binary.BigEndian, uint32(0))
+
+	// 5. Main Tag Buffer (1 byte, 0 tags)
+	b.WriteByte(0)
+
+	// Final Response: Size Prefix + Buffer
+	res := b.Bytes()
+	final := make([]byte, 4+len(res))
+	binary.BigEndian.PutUint32(final[0:4], uint32(len(res)))
+	copy(final[4:], res)
+	connection.Write(final)
+}
+
+
+
+
 func handleClientRequest(connection net.Conn){
 	defer connection.Close()  // close connectiong if when loop breaks
 
@@ -491,32 +572,7 @@ func handleClientRequest(connection net.Conn){
 }
 
 
-func sendApiVersionResponse(connection net.Conn, correlationID uint32, apiVersion int16) {
-	var b bytes.Buffer
 
-	binary.Write(&b, binary.BigEndian, correlationID)
-	if apiVersion < 0 || apiVersion > 4 {
-		binary.Write(&b, binary.BigEndian, errorApiUnsupportedVersion)
-        // b = append(b, 0, 35) // error code 35: UNSUPPORTED_VERSION
-    } else {
-		binary.Write(&b, binary.BigEndian, errorNone)
-        // b = append(b, 0, 0)  // error code 0: No error
-    }
-	
-	b.WriteByte(3) // API Keys count + 1
-	// ApiVersions (18)
-	binary.Write(&b, binary.BigEndian, int16(18)); binary.Write(&b, binary.BigEndian, int16(0)); binary.Write(&b, binary.BigEndian, int16(4)); b.WriteByte(0)
-	// DescribeTopicPartitions (75)
-	binary.Write(&b, binary.BigEndian, int16(75)); binary.Write(&b, binary.BigEndian, int16(0)); binary.Write(&b, binary.BigEndian, int16(0)); b.WriteByte(0)
-
-	binary.Write(&b, binary.BigEndian, uint32(0)) // Throttle
-	b.WriteByte(0) // Tagged
-
-	final := make([]byte, 4+b.Len())
-	binary.BigEndian.PutUint32(final[0:4], uint32(b.Len()))
-	copy(final[4:], b.Bytes())
-	connection.Write(final)
-}
 
 
 func processTopicPartitionResponse(connection net.Conn, correlationID uint32, topicNames []string) {
