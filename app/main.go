@@ -8,7 +8,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // Ensures gofmt doesn't remove the "net" and "os" imports in stage 1 (feel free to remove this!)
@@ -113,7 +112,7 @@ func readTopicIDFromMetadata(topicName string) ([]byte, int16) {
 		return defaultTopicID(), errorUnknownTopic
 	}
 	topicNameBytes := []byte(topicName)
-	idx := bytes.Index(data, nameBytes)
+	idx := bytes.Index(data, topicNameBytes)
 	if idx == -1 {
 		return defaultTopicID(), errorUnknownTopic
 	}
