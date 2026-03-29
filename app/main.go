@@ -356,16 +356,33 @@ func handleClientRequest(connection net.Conn){
 			curr += 2 // clientID length field
 			curr++    // tag buffer
 
-			// Read Topics Array Length (Compact)
-			_, n := binary.Uvarint(requestBuffer[curr:])
-			curr += n
 
-			// Read Topic Name (Compact String)
-			nameLen, n := binary.Uvarint(requestBuffer[curr:])
-			curr += n
-			topicName := string(requestBuffer[curr : curr+int(nameLen)-1])
+			
+			// // Read Topics Array Length (Compact)
+			// _, n := binary.Uvarint(requestBuffer[curr:])
+			// curr += n
 
-			processTopicPartitionResponse(connection, correlationID, topicName)
+			// // Read Topic Name (Compact String)
+			// nameLen, n := binary.Uvarint(requestBuffer[curr:])
+			// curr += n
+			// topicName := string(requestBuffer[curr : curr+int(nameLen)-1])
+
+			topicArrayLen, n := binary.Uvarint(requestBuffer[curr:])
+			curr += n
+			numTopics := int(topicArrayLen) - 1
+
+			var requestedTopics []string
+			for i := 0; i < numTopics; i++ {
+    		nameLen, n := binary.Uvarint(requestBuffer[curr:])
+    		curr += n
+    		topicName := string(requestBuffer[curr : curr+int(nameLen)-1])
+    		curr += int(nameLen) - 1
+    		curr++ // skip tag buffer for each topic
+    		requestedTopics = append(requestedTopics, topicName)
+			}
+
+
+			processTopicPartitionResponse(connection, correlationID, requestedTopics)
 		}
 
 	}
@@ -399,47 +416,147 @@ func sendApiVersionResponse(connection net.Conn, correlationID uint32, apiVersio
 	connection.Write(final)
 }
 
-func processTopicPartitionResponse(connection net.Conn, correlationID uint32, topicName string) {
-	topicID, errCode := readTopicIDFromMetadata(topicName)
 
+func processTopicPartitionResponse(connection net.Conn, correlationID uint32, topicNames []string) {
 	var b bytes.Buffer
+
+	// 1. Header: Correlation ID (4 bytes)
 	binary.Write(&b, binary.BigEndian, correlationID)
-	b.WriteByte(0) // Header Tagged Fields
+	// 2. Header Tag Buffer (1 byte, usually 0)
+	b.WriteByte(0)
 
-	binary.Write(&b, binary.BigEndian, uint32(0)) // Throttle
-	b.WriteByte(2) // Topic Array Length (1 + 1)
-
-	// Topic Object
-	binary.Write(&b, binary.BigEndian, errCode)
-	b.WriteByte(byte(len(topicName) + 1))
-	b.WriteString(topicName)
-	b.Write(topicID) // FIX: This is now either the real ID or all zeros
-	b.WriteByte(0)   // IsInternal
+	// --- Response Body ---
 	
-	// Partitions Array
-	if errCode != errorNone {
-		b.WriteByte(1) // Empty array (0 + 1)
-	} else {
-		b.WriteByte(2) // 1 partition (1 + 1)
-		binary.Write(&b, binary.BigEndian, errorNone)
-		binary.Write(&b, binary.BigEndian, uint32(0)) // Index
-		binary.Write(&b, binary.BigEndian, uint32(1)) // Leader
-		binary.Write(&b, binary.BigEndian, uint32(0)) // Epoch
-		b.WriteByte(2); binary.Write(&b, binary.BigEndian, uint32(1)) // Replicas
-		b.WriteByte(2); binary.Write(&b, binary.BigEndian, uint32(1)) // ISR
-		b.WriteByte(1); b.WriteByte(1); b.WriteByte(1); b.WriteByte(0) // Misc fields
+	// 3. Throttle Time (int32)
+	binary.Write(&b, binary.BigEndian, uint32(0))
+
+	// 4. Topics Array Length (Compact Array: N + 1)
+	// If topicNames has 2 topics, we write 3.
+	b.WriteByte(byte(len(topicNames) + 1))
+
+	for _, name := range topicNames {
+		// Look up metadata for this specific topic
+		uuid, errCode := readTopicIDFromMetadata(name)
+
+		// A. Topic Error Code (int16)
+		binary.Write(&b, binary.BigEndian, errCode)
+
+		// B. Topic Name (Compact String: Len + 1 followed by bytes)
+		b.WriteByte(byte(len(name) + 1))
+		b.WriteString(name)
+
+		// C. Topic ID (16 bytes)
+		b.Write(uuid)
+
+		// D. Is Internal (bool/int8)
+		b.WriteByte(0)
+
+		// E. Partitions Array (Compact Array)
+		if errCode != errorNone {
+			// If topic is unknown, array length is 0 (encoded as 0 + 1 = 1)
+			b.WriteByte(1)
+		} else {
+			// We are returning 1 partition (index 0). Encoded as 1 + 1 = 2.
+			b.WriteByte(2)
+
+			// --- Start Partition 0 Block ---
+			binary.Write(&b, binary.BigEndian, errorNone)     // Partition Error Code
+			binary.Write(&b, binary.BigEndian, uint32(0))     // Partition Index
+			binary.Write(&b, binary.BigEndian, uint32(1))     // Leader ID (Broker 1)
+			binary.Write(&b, binary.BigEndian, uint32(0))     // Leader Epoch
+			
+			// Replicas Array (Compact: 1 replica [broker 1] -> 2)
+			b.WriteByte(2)
+			binary.Write(&b, binary.BigEndian, uint32(1))
+
+			// ISR Array (Compact: 1 ISR [broker 1] -> 2)
+			b.WriteByte(2)
+			binary.Write(&b, binary.BigEndian, uint32(1))
+
+			// Offline Replicas (Compact: 0 -> 1)
+			b.WriteByte(1)
+			// ELR (Compact: 0 -> 1)
+			b.WriteByte(1)
+			// Last Known ELR (Compact: 0 -> 1)
+			b.WriteByte(1)
+			
+			// Partition Tagged Fields (1 byte, 0 tags)
+			b.WriteByte(0)
+		}
+
+		// F. Topic Authorized Operations (int32)
+		// Standard value 3576 (0x00000df8) for this challenge
+		binary.Write(&b, binary.BigEndian, uint32(3576))
+
+		// G. Topic Tagged Fields (1 byte, 0 tags)
+		b.WriteByte(0)
 	}
 
-	binary.Write(&b, binary.BigEndian, uint32(0x00000df8)) // Authorized Ops
-	b.WriteByte(0)    // Topic Tags
-	b.WriteByte(0xff) // Cursor
-	b.WriteByte(0)    // Main Tags
+	// 5. Next Cursor (Nullable byte, 0xff for null)
+	b.WriteByte(0xff)
 
-	final := make([]byte, 4+b.Len())
-	binary.BigEndian.PutUint32(final[0:4], uint32(b.Len()))
-	copy(final[4:], b.Bytes())
-	connection.Write(final)
+	// 6. Main Response Tag Buffer (1 byte, 0 tags)
+	b.WriteByte(0)
+
+	// --- Final Send ---
+	
+	// Total response = 4 bytes (size) + content of buffer
+	resBytes := b.Bytes()
+	finalResponse := make([]byte, 4+len(resBytes))
+	
+	binary.BigEndian.PutUint32(finalResponse[0:4], uint32(len(resBytes)))
+	copy(finalResponse[4:], resBytes)
+
+	connection.Write(finalResponse)
 }
+
+
+
+
+
+
+
+// func processTopicPartitionResponse(connection net.Conn, correlationID uint32, topicName string) {
+// 	topicID, errCode := readTopicIDFromMetadata(topicName)
+
+// 	var b bytes.Buffer
+// 	binary.Write(&b, binary.BigEndian, correlationID)
+// 	b.WriteByte(0) // Header Tagged Fields
+
+// 	binary.Write(&b, binary.BigEndian, uint32(0)) // Throttle
+// 	b.WriteByte(2) // Topic Array Length (1 + 1)
+
+// 	// Topic Object
+// 	binary.Write(&b, binary.BigEndian, errCode)
+// 	b.WriteByte(byte(len(topicName) + 1))
+// 	b.WriteString(topicName)
+// 	b.Write(topicID) // FIX: This is now either the real ID or all zeros
+// 	b.WriteByte(0)   // IsInternal
+	
+// 	// Partitions Array
+// 	if errCode != errorNone {
+// 		b.WriteByte(1) // Empty array (0 + 1)
+// 	} else {
+// 		b.WriteByte(2) // 1 partition (1 + 1)
+// 		binary.Write(&b, binary.BigEndian, errorNone)
+// 		binary.Write(&b, binary.BigEndian, uint32(0)) // Index
+// 		binary.Write(&b, binary.BigEndian, uint32(1)) // Leader
+// 		binary.Write(&b, binary.BigEndian, uint32(0)) // Epoch
+// 		b.WriteByte(2); binary.Write(&b, binary.BigEndian, uint32(1)) // Replicas
+// 		b.WriteByte(2); binary.Write(&b, binary.BigEndian, uint32(1)) // ISR
+// 		b.WriteByte(1); b.WriteByte(1); b.WriteByte(1); b.WriteByte(0) // Misc fields
+// 	}
+
+// 	binary.Write(&b, binary.BigEndian, uint32(0x00000df8)) // Authorized Ops
+// 	b.WriteByte(0)    // Topic Tags
+// 	b.WriteByte(0xff) // Cursor
+// 	b.WriteByte(0)    // Main Tags
+
+// 	final := make([]byte, 4+b.Len())
+// 	binary.BigEndian.PutUint32(final[0:4], uint32(b.Len()))
+// 	copy(final[4:], b.Bytes())
+// 	connection.Write(final)
+// }
 
 
 
