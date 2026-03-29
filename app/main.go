@@ -318,12 +318,12 @@ func handleClientRequest(connection net.Conn){
 			return
 		}
 
-		apiKey := int16(binary.BigEndian.Uint16(requestBuf[0:2]))
-		correlationID := binary.BigEndian.Uint32(requestBuf[4:8])
+		apiKey := int16(binary.BigEndian.Uint16(requestBuffer[0:2]))
+		correlationID := binary.BigEndian.Uint32(requestBuffer[4:8])
 
 		switch apiKey {
 		case 18:
-			sendApiVersionResponse(conn, correlationID)
+			sendApiVersionResponse(connection, correlationID)
 		case 75:
 			// Manual skip of header to find Topic Name
 			curr := 8
