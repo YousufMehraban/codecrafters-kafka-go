@@ -375,6 +375,7 @@ func handleClientRequest(connection net.Conn){
 func sendApiVersionResponse(connection net.Conn, correlationID uint32, apiVersion int16) {
 	var b bytes.Buffer
 
+	binary.Write(&b, binary.BigEndian, correlationID)
 	if apiVersion < 0 || apiVersion > 4 {
 		binary.Write(&b, binary.BigEndian, errorApiUnsupportedVersion)
         // b = append(b, 0, 35) // error code 35: UNSUPPORTED_VERSION
@@ -383,8 +384,7 @@ func sendApiVersionResponse(connection net.Conn, correlationID uint32, apiVersio
         // b = append(b, 0, 0)  // error code 0: No error
     }
 
-	binary.Write(&b, binary.BigEndian, correlationID)
-	binary.Write(&b, binary.BigEndian, errorNone)
+	// binary.Write(&b, binary.BigEndian, errorNone)
 	
 	b.WriteByte(3) // API Keys count + 1
 	// ApiVersions (18)
