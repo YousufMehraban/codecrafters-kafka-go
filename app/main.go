@@ -94,36 +94,87 @@ func defaultTopicID() []byte {
 // }
 
 
-func parseLogDirectory() string {
-	if len(os.Args) < 2 {
-		// Fallback if no config file is provided
-		return "/tmp/kafka-logs"
-	}
+// func parseLogDirectory() string {
+// 	if len(os.Args) < 2 {
+// 		// Fallback if no config file is provided
+// 		return "/tmp/kafka-logs"
+// 	}
 	
-	// CodeCrafters passes the properties file path as the first argument
-	propsPath := os.Args[1]
-	data, err := os.ReadFile(propsPath)
-	if err != nil {
-		return "/tmp/kafka-logs"
-	}
+// 	// CodeCrafters passes the properties file path as the first argument
+// 	propsPath := os.Args[1]
+// 	data, err := os.ReadFile(propsPath)
+// 	if err != nil {
+// 		return "/tmp/kafka-logs"
+// 	}
 
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "log.dirs=") {
-			value := strings.TrimPrefix(line, "log.dirs=")
-			// Handle potential CSV values, take the first one
-			if parts := strings.Split(value, ","); len(parts) > 0 {
-				return strings.TrimSpace(parts[0])
-			}
-			return value
-		}
-	}
-	return "/tmp/kafka-logs"
-}
+// 	lines := strings.Split(string(data), "\n")
+// 	for _, line := range lines {
+// 		line = strings.TrimSpace(line)
+// 		if strings.HasPrefix(line, "log.dirs=") {
+// 			value := strings.TrimPrefix(line, "log.dirs=")
+// 			// Handle potential CSV values, take the first one
+// 			if parts := strings.Split(value, ","); len(parts) > 0 {
+// 				return strings.TrimSpace(parts[0])
+// 			}
+// 			return value
+// 		}
+// 	}
+// 	return "/tmp/kafka-logs"
+// }
 
 func zeroUUID() []byte {
 	return make([]byte, 16)
+}
+
+func parseLogDirFromServerProperties() string {
+	// Default fallback as required by the challenge spec
+	defaultDir := "/tmp/kafka-logs"
+
+	// CodeCrafters usually runs the app like: 
+	// ./your_program.sh --properties-file server.properties
+	// So we look for the argument immediately following the flag.
+	var propsPath string
+	for i, arg := range os.Args {
+		if arg == "--properties-file" && i+1 < len(os.Args) {
+			propsPath = os.Args[i+1]
+			break
+		}
+	}
+
+	// If no flag was found, try the first argument just in case
+	if propsPath == "" && len(os.Args) > 1 {
+		propsPath = os.Args[1]
+	}
+
+	// If we still don't have a path, return the default
+	if propsPath == "" {
+		return defaultDir
+	}
+
+	data, err := os.ReadFile(propsPath)
+	if err != nil {
+		return defaultDir
+	}
+
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		// Skip empty lines or comments
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		if strings.HasPrefix(line, "log.dirs=") {
+			// Extract the value after the '='
+			value := strings.TrimPrefix(line, "log.dirs=")
+			// log.dirs can be a comma-separated list; we take the first one
+			parts := strings.Split(value, ",")
+			if len(parts) > 0 {
+				return strings.TrimSpace(parts[0])
+			}
+		}
+	}
+
+	return defaultDir
 }
 
 
