@@ -457,7 +457,7 @@ func processTopicPartitionResponse(connection net.Conn, correlationID uint32, to
 			b.WriteByte(1)
 		} else {
 			// We are returning 1 partition (index 0). Encoded as 1 + 1 = 2.
-			b.WriteByte(2)
+			b.WriteByte(3)
 
 			// --- Start Partition 0 Block ---
 			binary.Write(&b, binary.BigEndian, errorNone)     // Partition Error Code
@@ -482,6 +482,15 @@ func processTopicPartitionResponse(connection net.Conn, correlationID uint32, to
 			
 			// Partition Tagged Fields (1 byte, 0 tags)
 			b.WriteByte(0)
+
+			// --- Partition 1 Block (New) ---
+			binary.Write(&b, binary.BigEndian, errorNone)
+			binary.Write(&b, binary.BigEndian, uint32(1)) // Index 1
+			binary.Write(&b, binary.BigEndian, uint32(1)) // Leader
+			binary.Write(&b, binary.BigEndian, uint32(0)) // Epoch
+			b.WriteByte(2); binary.Write(&b, binary.BigEndian, uint32(1)) // Replicas
+			b.WriteByte(2); binary.Write(&b, binary.BigEndian, uint32(1)) // ISR
+			b.WriteByte(1); b.WriteByte(1); b.WriteByte(1); b.WriteByte(0) // Offline/ELR/Tags
 		}
 
 		// F. Topic Authorized Operations (int32)
