@@ -383,8 +383,6 @@ func sendApiVersionResponse(connection net.Conn, correlationID uint32, apiVersio
 		binary.Write(&b, binary.BigEndian, errorNone)
         // b = append(b, 0, 0)  // error code 0: No error
     }
-
-	// binary.Write(&b, binary.BigEndian, errorNone)
 	
 	b.WriteByte(3) // API Keys count + 1
 	// ApiVersions (18)
