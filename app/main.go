@@ -342,11 +342,12 @@ func handleClientRequest(connection net.Conn){
 		}
 
 		apiKey := int16(binary.BigEndian.Uint16(requestBuffer[0:2]))
+		apiVersion := int16(binary.BigEndian.Uint16(bodyBuffer[2:4]))
 		correlationID := binary.BigEndian.Uint32(requestBuffer[4:8])
 
 		switch apiKey {
 		case 18:
-			sendApiVersionResponse(connection, correlationID)
+			sendApiVersionResponse(connection, correlationID, apiVersion)
 		case 75:
 			// Manual skip of header to find Topic Name
 			curr := 8
@@ -371,8 +372,15 @@ func handleClientRequest(connection net.Conn){
 }
 
 
-func sendApiVersionResponse(conn net.Conn, correlationID uint32) {
+func sendApiVersionResponse(connection net.Conn, correlationID uint32, apiVersion int16) {
 	var b bytes.Buffer
+
+	if apiVersion < 0 || apiVersion > 4 {
+        body = append(body, 0, 35) // error code 35: UNSUPPORTED_VERSION
+    } else {
+        body = append(body, 0, 0)  // error code 0: No error
+    }
+	
 	binary.Write(&b, binary.BigEndian, correlationID)
 	binary.Write(&b, binary.BigEndian, errorNone)
 	
@@ -388,10 +396,10 @@ func sendApiVersionResponse(conn net.Conn, correlationID uint32) {
 	final := make([]byte, 4+b.Len())
 	binary.BigEndian.PutUint32(final[0:4], uint32(b.Len()))
 	copy(final[4:], b.Bytes())
-	conn.Write(final)
+	connection.Write(final)
 }
 
-func processTopicPartitionResponse(conn net.Conn, correlationID uint32, topicName string) {
+func processTopicPartitionResponse(connection net.Conn, correlationID uint32, topicName string) {
 	topicID, errCode := readTopicIDFromMetadata(topicName)
 
 	var b bytes.Buffer
@@ -430,7 +438,7 @@ func processTopicPartitionResponse(conn net.Conn, correlationID uint32, topicNam
 	final := make([]byte, 4+b.Len())
 	binary.BigEndian.PutUint32(final[0:4], uint32(b.Len()))
 	copy(final[4:], b.Bytes())
-	conn.Write(final)
+	connection.Write(final)
 }
 
 
