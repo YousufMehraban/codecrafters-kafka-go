@@ -205,43 +205,127 @@ func sendApiVersionResponse(connection net.Conn, correlationID uint32, apiVersio
 
 
 
-func processFetchRequest(connection net.Conn, correlationID uint32, requestBuffer []byte) {
+// func processFetchRequest(connection net.Conn, correlationID uint32, requestBuffer []byte) {
+// 	var b bytes.Buffer
+
+// 	// 1. Header: Correlation ID (4 bytes)
+// 	binary.Write(&b, binary.BigEndian, correlationID)
+// 	// 2. Header Tag Buffer (Flexible versions require this, usually 0)
+// 	b.WriteByte(0)
+
+// 	// --- Response Body ---
+
+// 	// 3. Throttle Time (int32)
+// 	binary.Write(&b, binary.BigEndian, uint32(0))
+
+// 	// 4. Error Code (int16) - Global error for the fetch session
+// 	binary.Write(&b, binary.BigEndian, int16(0))
+
+// 	// 5. Session ID (int32) - 0 if not using fetch sessions
+// 	binary.Write(&b, binary.BigEndian, uint32(0))
+
+// 	// 6. Topics Array (COMPACT ARRAY)
+// 	// Requirement: "No topics" means an empty array.
+// 	// Compact Array encoding: N + 1. Since N=0, we write 1.
+// 	b.WriteByte(1)
+
+// 	// 7. Main Response Tag Buffer (1 byte, 0 tags)
+// 	b.WriteByte(0)
+
+// 	// --- Final Send ---
+// 	resBytes := b.Bytes()
+// 	finalResponse := make([]byte, 4+len(resBytes))
+// 	binary.BigEndian.PutUint32(finalResponse[0:4], uint32(len(resBytes)))
+// 	copy(finalResponse[4:], resBytes)
+
+// 	connection.Write(finalResponse)
+// }
+
+
+
+
+func handleFetchRequest(connection net.Conn, correlationID uint32, requestBuffer []byte) {
 	var b bytes.Buffer
 
-	// 1. Header: Correlation ID (4 bytes)
+	// --- 1. PARSING THE REQUEST ---
+	curr := 8 // Start after header
+	// Skip ClientID
+	idLen := int(binary.BigEndian.Uint16(requestBuffer[curr : curr+2]))
+	curr += 2 + idLen + 1 // skip clientId and header tags
+
+	// Skip global fetch fields (MaxWait, MinBytes, etc.)
+	curr += 15 
+
+	// Read Topics Array Length (Compact)
+	topicArrayLen, n := binary.Uvarint(requestBuffer[curr:])
+	curr += n
+	numTopics := int(topicArrayLen) - 1
+
+	type topicReq struct {
+		id []byte
+	}
+	var requestedTopics []topicReq
+	for i := 0; i < numTopics; i++ {
+		tID := make([]byte, 16)
+		copy(tID, reqBuf[curr:curr+16])
+		curr += 16
+		
+		// Skip partitions array for now
+		_, n = binary.Uvarint(requestBuffer[curr:])
+		curr += n
+		curr++ // skip tags
+		
+		requestedTopics = append(requestedTopics, topicReq{id: tID})
+	}
+
+	// --- 2. BUILDING THE RESPONSE ---
+	
 	binary.Write(&b, binary.BigEndian, correlationID)
-	// 2. Header Tag Buffer (Flexible versions require this, usually 0)
-	b.WriteByte(0)
+	b.WriteByte(0) // Header Tag
 
-	// --- Response Body ---
+	binary.Write(&b, binary.BigEndian, uint32(0)) // Throttle
+	binary.Write(&b, binary.BigEndian, int16(0))  // Global Error
+	binary.Write(&b, binary.BigEndian, uint32(0)) // Session ID
 
-	// 3. Throttle Time (int32)
-	binary.Write(&b, binary.BigEndian, uint32(0))
+	// Topics Array (Compact)
+	b.WriteByte(byte(len(requestedTopics) + 1))
 
-	// 4. Error Code (int16) - Global error for the fetch session
-	binary.Write(&b, binary.BigEndian, int16(0))
+	for _, t := range requestedTopics {
+		// Check if ID is known
+		_, errCode := getTopicNameFromID(t.id)
 
-	// 5. Session ID (int32) - 0 if not using fetch sessions
-	binary.Write(&b, binary.BigEndian, uint32(0))
+		// A. Topic ID
+		b.Write(t.id)
 
-	// 6. Topics Array (COMPACT ARRAY)
-	// Requirement: "No topics" means an empty array.
-	// Compact Array encoding: N + 1. Since N=0, we write 1.
-	b.WriteByte(1)
+		// B. Partitions Array
+		// For an unknown topic, return 1 partition with Error 100
+		b.WriteByte(2) 
+		binary.Write(&b, binary.BigEndian, uint32(0)) // Partition Index
+		binary.Write(&b, binary.BigEndian, errCode)   // Error Code 100 goes here!
+		
+		binary.Write(&b, binary.BigEndian, int64(0))  // High Watermark
+		binary.Write(&b, binary.BigEndian, int64(0))  // Last Stable Offset
+		binary.Write(&b, binary.BigEndian, int64(0))  // Log Start Offset
+		
+		b.WriteByte(1) // Aborted Transactions (Empty)
+		binary.Write(&b, binary.BigEndian, uint32(0)) // Preferred Read Replica
+		
+		// Records (Empty Compact Records Batch)
+		// A null/empty record set is just 0x01 in compact format
+		b.WriteByte(1) 
+		
+		b.WriteByte(0) // Partition Tags
+	}
 
-	// 7. Main Response Tag Buffer (1 byte, 0 tags)
-	b.WriteByte(0)
+	b.WriteByte(0) // Main Tag Buffer
 
-	// --- Final Send ---
-	resBytes := b.Bytes()
-	finalResponse := make([]byte, 4+len(resBytes))
-	binary.BigEndian.PutUint32(finalResponse[0:4], uint32(len(resBytes)))
-	copy(finalResponse[4:], resBytes)
-
-	connection.Write(finalResponse)
+	// --- 3. SEND ---
+	res := b.Bytes()
+	final := make([]byte, 4+len(res))
+	binary.BigEndian.PutUint32(final[0:4], uint32(len(res)))
+	copy(final[4:], res)
+	connection.Write(final)
 }
-
-
 
 
 
@@ -320,6 +404,28 @@ func processTopicPartitionResponse(connection net.Conn, correlationID uint32, to
 	binary.BigEndian.PutUint32(final[0:4], uint32(len(res)))
 	copy(final[4:], res)
 	connection.Write(final)
+}
+
+
+
+// Helper to find if a Topic ID exists in your metadata
+func getTopicNameFromID(targetID []byte) (string, int16) {
+	logDir := parseLogDirFromServerProperties()
+	metadataPath := filepath.Join(logDir, "__cluster_metadata-0", "00000000000000000000.log")
+	data, err := os.ReadFile(metadataPath)
+	if err != nil {
+		return "", 100 // UNKNOWN_TOPIC_ID
+	}
+
+	// Scan the metadata for the 16-byte UUID
+	idx := bytes.Index(data, targetID)
+	if idx == -1 {
+		return "", 100 // Error 100 is required for unknown UUIDs
+	}
+
+	// Usually, the topic name precedes the UUID in the TopicRecord.
+	// For this stage, if we find the ID, we return errorNone.
+	return "found", 0 
 }
 
 
