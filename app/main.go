@@ -244,7 +244,7 @@ func sendApiVersionResponse(connection net.Conn, correlationID uint32, apiVersio
 
 
 
-func handleFetchRequest(connection net.Conn, correlationID uint32, requestBuffer []byte) {
+func processFetchRequest(connection net.Conn, correlationID uint32, requestBuffer []byte) {
 	var b bytes.Buffer
 
 	// --- 1. PARSING THE REQUEST ---
@@ -267,7 +267,7 @@ func handleFetchRequest(connection net.Conn, correlationID uint32, requestBuffer
 	var requestedTopics []topicReq
 	for i := 0; i < numTopics; i++ {
 		tID := make([]byte, 16)
-		copy(tID, reqBuf[curr:curr+16])
+		copy(tID, requestBuffer[curr:curr+16])
 		curr += 16
 		
 		// Skip partitions array for now
