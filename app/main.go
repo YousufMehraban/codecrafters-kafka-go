@@ -186,7 +186,7 @@ func sendApiVersionResponse(connection net.Conn, correlationID uint32, apiVersio
 	// --- ApiKey 75: DESCRIBE_TOPIC_PARTITIONS ---
 	binary.Write(&b, binary.BigEndian, int16(75)) // API Key
 	binary.Write(&b, binary.BigEndian, int16(0))  // Min Version
-	binary.Write(&b, binary.BigEndian, int16(4))  // Max Version
+	binary.Write(&b, binary.BigEndian, int16(0))  // Max Version
 	b.WriteByte(0)                                // Tag Buffer
 
 	// 4. Throttle Time (int32)
@@ -338,16 +338,20 @@ func processFetchRequest(conn net.Conn, correlationID uint32, reqBuf []byte) {
 	binary.Write(&b, binary.BigEndian, correlationID)
 	b.WriteByte(0) // Header Tag Buffer
 
-	// --- 2. RESPONSE BODY (Order is CRITICAL) ---
+	// --- 2. RESPONSE BODY (The order must be EXACT) ---
 	
 	// A. ThrottleTimeMs (int32)
-	binary.Write(&b, binary.BigEndian, uint32(0))
+	binary.Write(&b, binary.BigEndian, int32(0))
 
 	// B. ErrorCode (int16) - Global error
 	binary.Write(&b, binary.BigEndian, int16(0))
 
 	// C. SessionId (int32)
-	binary.Write(&b, binary.BigEndian, uint32(0))
+	binary.Write(&b, binary.BigEndian, int32(0))
+
+	// D. SESSION EPOCH (int32) - CRITICAL MISSING FIELD
+	// Use -1 to indicate that we aren't using fetch sessions.
+	binary.Write(&b, binary.BigEndian, int32(-1))
 
 	// --- 3. PARSING REQUEST ---
 	curr := 8 
