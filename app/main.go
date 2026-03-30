@@ -338,26 +338,33 @@ func processFetchRequest(conn net.Conn, correlationID uint32, reqBuf []byte) {
 	binary.Write(&b, binary.BigEndian, correlationID)
 	b.WriteByte(0) // Header Tag Buffer
 
-	// --- 2. Response Body (Top-level fields) ---
-	binary.Write(&b, binary.BigEndian, uint32(0)) // Throttle Time
-	binary.Write(&b, binary.BigEndian, int16(0))  // Global Error Code
-	binary.Write(&b, binary.BigEndian, uint32(0)) // Session ID
+	// --- 2. RESPONSE BODY (Order is CRITICAL) ---
+	
+	// A. ThrottleTimeMs (int32)
+	binary.Write(&b, binary.BigEndian, uint32(0))
 
-	// --- 3. Parse Request Topics ---
+	// B. ErrorCode (int16) - Global error
+	binary.Write(&b, binary.BigEndian, int16(0))
+
+	// C. SessionId (int32)
+	binary.Write(&b, binary.BigEndian, uint32(0))
+
+	// --- 3. PARSING REQUEST ---
 	curr := 8 
 	clientIdLen := int(binary.BigEndian.Uint16(reqBuf[curr : curr+2]))
 	curr += 2 + clientIdLen + 1 // skip clientId and header tags
-	curr += 15 // Skip global fetch fields (MaxWait, MinBytes, etc.)
+	
+	// Skip global request fields (MaxWait, MinBytes, etc.)
+	curr += 15 
 
+	// Read Topics Array Length (Compact Varint)
 	topicArrayLen, n := binary.Uvarint(reqBuf[curr:])
 	curr += n
 	numTopics := int(topicArrayLen) - 1
 
-	// --- 4. Build Response Topics Array ---
-	// Encode Topic Array Length (numTopics + 1) as Varint
-	varintBuf := make([]byte, binary.MaxVarintLen64)
-	n = binary.PutUvarint(varintBuf, uint64(numTopics+1))
-	b.Write(varintBuf[:n])
+	// --- 4. BUILDING RESPONSE TOPICS ARRAY ---
+	// Write Topics Array Length (numTopics + 1)
+	b.WriteByte(byte(numTopics + 1))
 
 	for i := 0; i < numTopics; i++ {
 		// Read 16-byte Topic ID from Request
@@ -372,10 +379,8 @@ func processFetchRequest(conn net.Conn, correlationID uint32, reqBuf []byte) {
 		// A. Write Topic ID back to Response
 		b.Write(topicID)
 
-		// B. Write Partitions Array Length (FIX: Expecting 1 partition, so length is 2)
-		// We use PutUvarint to guarantee it is not a "Null array" (0)
-		n = binary.PutUvarint(varintBuf, 2) 
-		b.Write(varintBuf[:n])
+		// B. Write Partitions Array (1 partition = 2)
+		b.WriteByte(2) 
 
 		// --- Start Partition 0 Block ---
 		binary.Write(&b, binary.BigEndian, uint32(0))   // Partition Index
@@ -385,23 +390,16 @@ func processFetchRequest(conn net.Conn, correlationID uint32, reqBuf []byte) {
 		binary.Write(&b, binary.BigEndian, int64(0))    // Last Stable Offset
 		binary.Write(&b, binary.BigEndian, int64(0))    // Log Start Offset
 		
-		// Aborted Transactions (Empty Compact Array: 0+1=1)
-		n = binary.PutUvarint(varintBuf, 1)
-		b.Write(varintBuf[:n])
-		
+		b.WriteByte(1) // Aborted Transactions (Empty = 1)
 		binary.Write(&b, binary.BigEndian, uint32(0))   // Preferred Read Replica
-		
-		// Records (Empty Compact Records Batch: length 1)
-		n = binary.PutUvarint(varintBuf, 1)
-		b.Write(varintBuf[:n])
-
+		b.WriteByte(1) // Records (Empty = 1)
 		b.WriteByte(0) // Partition Tagged Fields
 	}
 
 	// 5. Main Response Tag Buffer
 	b.WriteByte(0)
 
-	// --- 6. Final Send ---
+	// --- 6. FINAL SEND ---
 	res := b.Bytes()
 	final := make([]byte, 4+len(res))
 	binary.BigEndian.PutUint32(final[0:4], uint32(len(res)))
