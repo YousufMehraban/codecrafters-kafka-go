@@ -172,7 +172,7 @@ func sendApiVersionResponse(connection net.Conn, correlationID uint32, apiVersio
 	b.WriteByte(4)
 
 	// --- ApiKey 1: FETCH ---
-	binary.Write(&b, binary.BigEndian, int16(1))  // API Key
+	binary.Write(&b, binary.BigEndian, int16(16))  // API Key
 	binary.Write(&b, binary.BigEndian, int16(0))  // Min Version
 	binary.Write(&b, binary.BigEndian, int16(16)) // Max Version (at least 16)
 	b.WriteByte(0)                                // Tag Buffer (per entry)
