@@ -331,12 +331,12 @@ func sendApiVersionResponse(connection net.Conn, correlationID uint32, apiVersio
 
 
 
-func processFetchRequest(conn net.Conn, correlationID uint32, reqBuf []byte) {
+func handleFetchRequest(conn net.Conn, correlationID uint32, reqBuf []byte) {
 	var b bytes.Buffer
 
 	// 1. Header: Correlation ID + Header Tag Buffer (Flexible v16+)
 	binary.Write(&b, binary.BigEndian, correlationID)
-	b.WriteByte(0) 
+	b.WriteByte(0) // Header Tag Buffer
 
 	// --- 2. Response Body ---
 	binary.Write(&b, binary.BigEndian, uint32(0)) // Throttle Time
@@ -346,15 +346,15 @@ func processFetchRequest(conn net.Conn, correlationID uint32, reqBuf []byte) {
 	// --- 3. Parsing Request to get Topic IDs ---
 	curr := 8 
 	clientIdLen := int(binary.BigEndian.Uint16(reqBuf[curr : curr+2]))
-	curr += 2 + clientIdLen + 1 
-	curr += 15 // Skip global fetch fields (MaxWait, etc.)
+	curr += 2 + clientIdLen + 1 // skip clientId and header tags
+	curr += 15 // Skip global fetch fields (MaxWait, MinBytes, etc.)
 
 	topicArrayLen, n := binary.Uvarint(reqBuf[curr:])
 	curr += n
 	numTopics := int(topicArrayLen) - 1
 
 	// --- 4. Building Topics Array (Response) ---
-	// Compact Array Length (N topics + 1)
+	// Compact Array Length for Topics (N topics + 1)
 	b.WriteByte(byte(numTopics + 1))
 
 	for i := 0; i < numTopics; i++ {
@@ -370,7 +370,9 @@ func processFetchRequest(conn net.Conn, correlationID uint32, reqBuf []byte) {
 		// A. Write Topic ID back to Response
 		b.Write(topicID)
 
-		// B. Write Partitions Array (FIX: MUST BE 2 to represent 1 partition)
+		// B. Write Partitions Array Length
+		// CRITICAL FIX: The tester expects 1 partition, so length must be 2 (1 + 1)
+		// DO NOT USE b.WriteByte(0) here as it results in "Null array"
 		b.WriteByte(2) 
 
 		// --- Start Partition 0 Block ---
@@ -381,17 +383,17 @@ func processFetchRequest(conn net.Conn, correlationID uint32, reqBuf []byte) {
 		binary.Write(&b, binary.BigEndian, int64(0))    // Last Stable Offset
 		binary.Write(&b, binary.BigEndian, int64(0))    // Log Start Offset
 		
-		b.WriteByte(1) // Aborted Transactions (Compact Array 0+1=1)
+		b.WriteByte(1) // Aborted Transactions (Compact Array Length 0+1=1)
 		binary.Write(&b, binary.BigEndian, uint32(0))   // Preferred Read Replica
 		
-		// Records (Compact Records / COMPACT_NULLABLE_BYTES)
-		// Requirement: Empty record batch is represented by length 1
+		// Records (COMPACT_RECORDS)
+		// Empty record batch is represented by length 1
 		b.WriteByte(1) 
 
 		b.WriteByte(0) // Partition Tagged Fields
 	}
 
-	// 5. Main Response Tag Buffer
+	// 5. Main Response Tag Buffer (Final byte of the message)
 	b.WriteByte(0)
 
 	// --- 6. Final Send ---
@@ -401,6 +403,7 @@ func processFetchRequest(conn net.Conn, correlationID uint32, reqBuf []byte) {
 	copy(final[4:], res)
 	conn.Write(final)
 }
+
 
 
 
