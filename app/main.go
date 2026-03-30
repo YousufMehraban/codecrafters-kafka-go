@@ -372,7 +372,7 @@ func handleClientRequest(connection net.Conn){
     		curr += n
     		topicName := string(requestBuffer[curr : curr+int(nameLen)-1])
     		curr += int(nameLen) - 1
-    		curr++ // skip tag buffer for each topic
+    		// curr++ // skip tag buffer for each topic
 			_, n = binary.Uvarint(requestBuffer[curr:])
 			curr += n
 
