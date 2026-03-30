@@ -331,65 +331,75 @@ func sendApiVersionResponse(connection net.Conn, correlationID uint32, apiVersio
 
 
 
-func processFetchRequest(connection net.Conn, correlationID uint32, requestBuffer []byte) {
+func handleFetchRequest(conn net.Conn, correlationID uint32, reqBuf []byte) {
 	var b bytes.Buffer
 
-	// 1. Header
+	// 1. Header: Correlation ID + Header Tag Buffer (Flexible v16+)
 	binary.Write(&b, binary.BigEndian, correlationID)
-	b.WriteByte(0) // Header Tag Buffer
+	b.WriteByte(0) 
 
-	// --- 2. Request Parsing (Brief) ---
-	curr := 8 
-	clientIdLen := int(binary.BigEndian.Uint16(requestBuffer[curr : curr+2]))
-	curr += 2 + clientIdLen + 1 
-	curr += 15 // Skip global fetch fields (MaxWait, MinBytes, etc.)
-
-	// Read Topics Array Length
-	topicArrayLen, n := binary.Uvarint(requestBuffer[curr:])
-	curr += n
-	numTopics := int(topicArrayLen) - 1
-
-	// --- 3. Building Response Body ---
+	// --- 2. Response Body ---
 	binary.Write(&b, binary.BigEndian, uint32(0)) // Throttle Time
 	binary.Write(&b, binary.BigEndian, int16(0))  // Global Error
 	binary.Write(&b, binary.BigEndian, uint32(0)) // Session ID
 
-	// Topics Array Length (N + 1)
+	// --- 3. Parsing Request to get Topic IDs ---
+	curr := 8 
+	clientIdLen := int(binary.BigEndian.Uint16(reqBuf[curr : curr+2]))
+	curr += 2 + clientIdLen + 1 
+	curr += 15 // Skip global fetch fields (MaxWait, etc.)
+
+	topicArrayLen, n := binary.Uvarint(reqBuf[curr:])
+	curr += n
+	numTopics := int(topicArrayLen) - 1
+
+	// --- 4. Building Topics Array (Response) ---
+	// Compact Array Length (N topics + 1)
 	b.WriteByte(byte(numTopics + 1))
 
 	for i := 0; i < numTopics; i++ {
-		// Read requested Topic ID from request
-		topicID := requestBuffer[curr : curr+16]
+		// Read 16-byte Topic ID from Request
+		topicID := make([]byte, 16)
+		copy(topicID, reqBuf[curr:curr+16])
 		curr += 16
-		_, n = binary.Uvarint(requestBuffer[curr:]) // Skip partition array in request
-		curr += n + 1 // skip request tags
+		
+		// Skip request's partition array for this topic
+		_, n = binary.Uvarint(reqBuf[curr:])
+		curr += n + 1 // +1 for topic tag buffer in request
 
-		// A. Topic ID
+		// A. Write Topic ID back to Response
 		b.Write(topicID)
 
-		// B. Partitions Array (FIX: Expecting 1 partition, so write 2)
+		// B. Write Partitions Array (FIX: MUST BE 2 to represent 1 partition)
 		b.WriteByte(2) 
 
-		// --- Partition 0 Block ---
+		// --- Start Partition 0 Block ---
 		binary.Write(&b, binary.BigEndian, uint32(0))   // Partition Index
-		binary.Write(&b, binary.BigEndian, int16(100))  // Error: UNKNOWN_TOPIC_ID
+		binary.Write(&b, binary.BigEndian, int16(100))  // Error: UNKNOWN_TOPIC_ID (100)
+		
 		binary.Write(&b, binary.BigEndian, int64(0))    // High Watermark
 		binary.Write(&b, binary.BigEndian, int64(0))    // Last Stable Offset
 		binary.Write(&b, binary.BigEndian, int64(0))    // Log Start Offset
-		b.WriteByte(1)                                  // Aborted Transactions
+		
+		b.WriteByte(1) // Aborted Transactions (Compact Array 0+1=1)
 		binary.Write(&b, binary.BigEndian, uint32(0))   // Preferred Read Replica
-		b.WriteByte(1)                                  // Empty Records Batch
-		b.WriteByte(0)                                  // Partition Tags
+		
+		// Records (Compact Records / COMPACT_NULLABLE_BYTES)
+		// Requirement: Empty record batch is represented by length 1
+		b.WriteByte(1) 
+
+		b.WriteByte(0) // Partition Tagged Fields
 	}
 
-	b.WriteByte(0) // Main Tag Buffer
+	// 5. Main Response Tag Buffer
+	b.WriteByte(0)
 
-	// --- 4. Final Send ---
+	// --- 6. Final Send ---
 	res := b.Bytes()
 	final := make([]byte, 4+len(res))
 	binary.BigEndian.PutUint32(final[0:4], uint32(len(res)))
 	copy(final[4:], res)
-	connection.Write(final)
+	conn.Write(final)
 }
 
 
