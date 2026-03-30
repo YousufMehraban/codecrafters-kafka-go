@@ -430,7 +430,7 @@ func processFetchRequest(connection net.Conn, correlationID uint32, requestBuffe
 
 	// Fetch v16 body fixed fields:
 	// replica_id, max_wait_ms, min_bytes, max_bytes, isolation_level, session_id, session_epoch
-	const fixedFetchFields = 4 + 4 + 4 + 4 + 1 + 4 + 4
+	const fixedFetchFields = 4 + 4 + 4 + 1 + 4 + 4
 	if curr+fixedFetchFields <= len(requestBuffer) {
 		curr += fixedFetchFields
 	}
