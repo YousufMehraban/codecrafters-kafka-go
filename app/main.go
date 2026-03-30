@@ -331,7 +331,7 @@ func sendApiVersionResponse(connection net.Conn, correlationID uint32, apiVersio
 
 
 
-func handleFetchRequest(connection net.Conn, correlationID uint32, requestBuffer []byte) {
+func processFetchRequest(connection net.Conn, correlationID uint32, requestBuffer []byte) {
 	var b bytes.Buffer
 
 	// 1. Header
