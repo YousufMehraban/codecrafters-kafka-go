@@ -244,88 +244,155 @@ func sendApiVersionResponse(connection net.Conn, correlationID uint32, apiVersio
 
 
 
-func processFetchRequest(connection net.Conn, correlationID uint32, requestBuffer []byte) {
+// func processFetchRequest(connection net.Conn, correlationID uint32, requestBuffer []byte) {
+// 	var b bytes.Buffer
+
+// 	// --- 1. PARSING THE REQUEST ---
+// 	curr := 8 // Start after header
+// 	// Skip ClientID
+// 	idLen := int(binary.BigEndian.Uint16(requestBuffer[curr : curr+2]))
+// 	curr += 2 + idLen + 1 // skip clientId and header tags
+
+// 	// Skip global fetch fields (MaxWait, MinBytes, etc.)
+// 	curr += 15 
+
+// 	// Read Topics Array Length (Compact)
+// 	topicArrayLen, n := binary.Uvarint(requestBuffer[curr:])
+// 	curr += n
+// 	numTopics := int(topicArrayLen) - 1
+
+// 	type topicReq struct {
+// 		id []byte
+// 	}
+// 	var requestedTopics []topicReq
+// 	for i := 0; i < numTopics; i++ {
+// 		tID := make([]byte, 16)
+// 		copy(tID, requestBuffer[curr:curr+16])
+// 		curr += 16
+		
+// 		// Skip partitions array for now
+// 		_, n = binary.Uvarint(requestBuffer[curr:])
+// 		curr += n
+// 		curr++ // skip tags
+		
+// 		requestedTopics = append(requestedTopics, topicReq{id: tID})
+// 	}
+
+// 	// --- 2. BUILDING THE RESPONSE ---
+	
+// 	binary.Write(&b, binary.BigEndian, correlationID)
+// 	b.WriteByte(0) // Header Tag
+
+// 	binary.Write(&b, binary.BigEndian, uint32(0)) // Throttle
+// 	binary.Write(&b, binary.BigEndian, int16(0))  // Global Error
+// 	binary.Write(&b, binary.BigEndian, uint32(0)) // Session ID
+
+// 	// Topics Array (Compact)
+// 	b.WriteByte(byte(len(requestedTopics) + 1))
+
+// 	for _, t := range requestedTopics {
+// 		// Check if ID is known
+// 		_, errCode := getTopicNameFromID(t.id)
+
+// 		// A. Topic ID
+// 		b.Write(t.id)
+
+// 		// B. Partitions Array
+// 		// For an unknown topic, return 1 partition with Error 100
+// 		b.WriteByte(2) 
+// 		binary.Write(&b, binary.BigEndian, uint32(0)) // Partition Index
+// 		binary.Write(&b, binary.BigEndian, errCode)   // Error Code 100 goes here!
+		
+// 		binary.Write(&b, binary.BigEndian, int64(0))  // High Watermark
+// 		binary.Write(&b, binary.BigEndian, int64(0))  // Last Stable Offset
+// 		binary.Write(&b, binary.BigEndian, int64(0))  // Log Start Offset
+		
+// 		b.WriteByte(1) // Aborted Transactions (Empty)
+// 		binary.Write(&b, binary.BigEndian, uint32(0)) // Preferred Read Replica
+		
+// 		// Records (Empty Compact Records Batch)
+// 		// A null/empty record set is just 0x01 in compact format
+// 		b.WriteByte(1) 
+		
+// 		b.WriteByte(0) // Partition Tags
+// 	}
+
+// 	b.WriteByte(0) // Main Tag Buffer
+
+// 	// --- 3. SEND ---
+// 	res := b.Bytes()
+// 	final := make([]byte, 4+len(res))
+// 	binary.BigEndian.PutUint32(final[0:4], uint32(len(res)))
+// 	copy(final[4:], res)
+// 	connection.Write(final)
+// }
+
+
+
+
+
+func handleFetchRequest(connection net.Conn, correlationID uint32, requestBuffer []byte) {
 	var b bytes.Buffer
 
-	// --- 1. PARSING THE REQUEST ---
-	curr := 8 // Start after header
-	// Skip ClientID
-	idLen := int(binary.BigEndian.Uint16(requestBuffer[curr : curr+2]))
-	curr += 2 + idLen + 1 // skip clientId and header tags
+	// 1. Header
+	binary.Write(&b, binary.BigEndian, correlationID)
+	b.WriteByte(0) // Header Tag Buffer
 
-	// Skip global fetch fields (MaxWait, MinBytes, etc.)
-	curr += 15 
+	// --- 2. Request Parsing (Brief) ---
+	curr := 8 
+	clientIdLen := int(binary.BigEndian.Uint16(requestBuffer[curr : curr+2]))
+	curr += 2 + clientIdLen + 1 
+	curr += 15 // Skip global fetch fields (MaxWait, MinBytes, etc.)
 
-	// Read Topics Array Length (Compact)
+	// Read Topics Array Length
 	topicArrayLen, n := binary.Uvarint(requestBuffer[curr:])
 	curr += n
 	numTopics := int(topicArrayLen) - 1
 
-	type topicReq struct {
-		id []byte
-	}
-	var requestedTopics []topicReq
-	for i := 0; i < numTopics; i++ {
-		tID := make([]byte, 16)
-		copy(tID, requestBuffer[curr:curr+16])
-		curr += 16
-		
-		// Skip partitions array for now
-		_, n = binary.Uvarint(requestBuffer[curr:])
-		curr += n
-		curr++ // skip tags
-		
-		requestedTopics = append(requestedTopics, topicReq{id: tID})
-	}
-
-	// --- 2. BUILDING THE RESPONSE ---
-	
-	binary.Write(&b, binary.BigEndian, correlationID)
-	b.WriteByte(0) // Header Tag
-
-	binary.Write(&b, binary.BigEndian, uint32(0)) // Throttle
+	// --- 3. Building Response Body ---
+	binary.Write(&b, binary.BigEndian, uint32(0)) // Throttle Time
 	binary.Write(&b, binary.BigEndian, int16(0))  // Global Error
 	binary.Write(&b, binary.BigEndian, uint32(0)) // Session ID
 
-	// Topics Array (Compact)
-	b.WriteByte(byte(len(requestedTopics) + 1))
+	// Topics Array Length (N + 1)
+	b.WriteByte(byte(numTopics + 1))
 
-	for _, t := range requestedTopics {
-		// Check if ID is known
-		_, errCode := getTopicNameFromID(t.id)
+	for i := 0; i < numTopics; i++ {
+		// Read requested Topic ID from request
+		topicID := requestBuffer[curr : curr+16]
+		curr += 16
+		_, n = binary.Uvarint(requestBuffer[curr:]) // Skip partition array in request
+		curr += n + 1 // skip request tags
 
 		// A. Topic ID
-		b.Write(t.id)
+		b.Write(topicID)
 
-		// B. Partitions Array
-		// For an unknown topic, return 1 partition with Error 100
+		// B. Partitions Array (FIX: Expecting 1 partition, so write 2)
 		b.WriteByte(2) 
-		binary.Write(&b, binary.BigEndian, uint32(0)) // Partition Index
-		binary.Write(&b, binary.BigEndian, errCode)   // Error Code 100 goes here!
-		
-		binary.Write(&b, binary.BigEndian, int64(0))  // High Watermark
-		binary.Write(&b, binary.BigEndian, int64(0))  // Last Stable Offset
-		binary.Write(&b, binary.BigEndian, int64(0))  // Log Start Offset
-		
-		b.WriteByte(1) // Aborted Transactions (Empty)
-		binary.Write(&b, binary.BigEndian, uint32(0)) // Preferred Read Replica
-		
-		// Records (Empty Compact Records Batch)
-		// A null/empty record set is just 0x01 in compact format
-		b.WriteByte(1) 
-		
-		b.WriteByte(0) // Partition Tags
+
+		// --- Partition 0 Block ---
+		binary.Write(&b, binary.BigEndian, uint32(0))   // Partition Index
+		binary.Write(&b, binary.BigEndian, int16(100))  // Error: UNKNOWN_TOPIC_ID
+		binary.Write(&b, binary.BigEndian, int64(0))    // High Watermark
+		binary.Write(&b, binary.BigEndian, int64(0))    // Last Stable Offset
+		binary.Write(&b, binary.BigEndian, int64(0))    // Log Start Offset
+		b.WriteByte(1)                                  // Aborted Transactions
+		binary.Write(&b, binary.BigEndian, uint32(0))   // Preferred Read Replica
+		b.WriteByte(1)                                  // Empty Records Batch
+		b.WriteByte(0)                                  // Partition Tags
 	}
 
 	b.WriteByte(0) // Main Tag Buffer
 
-	// --- 3. SEND ---
+	// --- 4. Final Send ---
 	res := b.Bytes()
 	final := make([]byte, 4+len(res))
 	binary.BigEndian.PutUint32(final[0:4], uint32(len(res)))
 	copy(final[4:], res)
 	connection.Write(final)
 }
+
+
 
 
 
