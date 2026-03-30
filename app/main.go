@@ -338,55 +338,58 @@ func processFetchRequest(conn net.Conn, correlationID uint32, reqBuf []byte) {
 	binary.Write(&b, binary.BigEndian, correlationID)
 	b.WriteByte(0) // Header Tag Buffer
 
-	// --- 2. RESPONSE BODY (The order must be EXACT) ---
+	// --- 2. RESPONSE BODY (EXACT V16 ORDER) ---
 	
-	// A. ThrottleTimeMs (int32)
+	// A. ThrottleTimeMs (Int32)
 	binary.Write(&b, binary.BigEndian, int32(0))
 
-	// B. ErrorCode (int16) - Global error
+	// B. ErrorCode (Int16) - Global error
 	binary.Write(&b, binary.BigEndian, int16(0))
 
-	// C. SessionId (int32)
+	// C. SessionId (Int32)
 	binary.Write(&b, binary.BigEndian, int32(0))
 
-	// D. SESSION EPOCH (int32) - CRITICAL MISSING FIELD
-	// Use -1 to indicate that we aren't using fetch sessions.
-	binary.Write(&b, binary.BigEndian, int32(-1))
-
-	// --- 3. PARSING REQUEST ---
+	// --- 3. PARSING REQUEST TO ECHO TOPIC IDs ---
+	// Start parsing after Header (8 bytes)
 	curr := 8 
-	clientIdLen := int(binary.BigEndian.Uint16(reqBuf[curr : curr+2]))
-	curr += 2 + clientIdLen + 1 // skip clientId and header tags
-	
-	// Skip global request fields (MaxWait, MinBytes, etc.)
+	clientIdLen := int(int16(binary.BigEndian.Uint16(reqBuf[curr : curr+2])))
+	curr += 2
+	if clientIdLen > 0 {
+		curr += clientIdLen
+	}
+	curr += 1 // Header Tag Buffer
+
+	// Skip Fetch Request Global Fields (MaxWait, MinBytes, MaxBytes, Isolation, SessionId, Epoch)
+	// These total 15 bytes in v16
 	curr += 15 
 
-	// Read Topics Array Length (Compact Varint)
+	// Read Topics Array Length from Request
 	topicArrayLen, n := binary.Uvarint(reqBuf[curr:])
 	curr += n
 	numTopics := int(topicArrayLen) - 1
 
 	// --- 4. BUILDING RESPONSE TOPICS ARRAY ---
-	// Write Topics Array Length (numTopics + 1)
+	// Write Topics Array Length (N + 1)
 	b.WriteByte(byte(numTopics + 1))
 
 	for i := 0; i < numTopics; i++ {
-		// Read 16-byte Topic ID from Request
+		// Read 16-byte Topic ID from Request to echo it back
 		topicID := make([]byte, 16)
 		copy(topicID, reqBuf[curr:curr+16])
 		curr += 16
 		
 		// Skip request's partition array for this topic
 		_, n = binary.Uvarint(reqBuf[curr:])
-		curr += n + 1 // skip tags
+		curr += n
+		curr++ // skip topic tags in request
 
-		// A. Write Topic ID back to Response
+		// A. Write Topic ID
 		b.Write(topicID)
 
 		// B. Write Partitions Array (1 partition = 2)
 		b.WriteByte(2) 
 
-		// --- Start Partition 0 Block ---
+		// --- Partition Block ---
 		binary.Write(&b, binary.BigEndian, uint32(0))   // Partition Index
 		binary.Write(&b, binary.BigEndian, int16(100))  // Error: UNKNOWN_TOPIC_ID (100)
 		
@@ -398,9 +401,12 @@ func processFetchRequest(conn net.Conn, correlationID uint32, reqBuf []byte) {
 		binary.Write(&b, binary.BigEndian, uint32(0))   // Preferred Read Replica
 		b.WriteByte(1) // Records (Empty = 1)
 		b.WriteByte(0) // Partition Tagged Fields
+		
+		// Topic-level Tagged Fields (Required for flexible versions)
+		b.WriteByte(0) 
 	}
 
-	// 5. Main Response Tag Buffer
+	// 5. Main Response Tag Buffer (The very last byte)
 	b.WriteByte(0)
 
 	// --- 6. FINAL SEND ---
@@ -410,6 +416,7 @@ func processFetchRequest(conn net.Conn, correlationID uint32, reqBuf []byte) {
 	copy(final[4:], res)
 	conn.Write(final)
 }
+
 
 
 
