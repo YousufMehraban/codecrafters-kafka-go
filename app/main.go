@@ -397,22 +397,165 @@ func sendApiVersionResponse(connection net.Conn, correlationID uint32, apiVersio
 // 	conn.Write(final)
 // }
 
+// func processFetchRequest(connection net.Conn, correlationID uint32, requestBuffer []byte) {
+// 	type fetchTopicRequest struct {
+// 		topicID    []byte
+// 		partitions []int32
+// 	}
+
+// 	writeCompactArrayLen := func(buf *bytes.Buffer, count int) {
+// 		var tmp [10]byte
+// 		n := binary.PutUvarint(tmp[:], uint64(count+1))
+// 		buf.Write(tmp[:n])
+// 	}
+
+// 	curr := 8 // ApiKey + ApiVersion + CorrelationID
+// 	topics := make([]fetchTopicRequest, 0)
+
+// 	// Request header v2: client_id (nullable string) + tagged fields
+// 	if curr+2 <= len(requestBuffer) {
+// 		clientIDLen := int16(binary.BigEndian.Uint16(requestBuffer[curr : curr+2]))
+// 		curr += 2
+// 		if clientIDLen > 0 {
+// 			curr += int(clientIDLen)
+// 		}
+// 	}
+
+// 	if curr < len(requestBuffer) {
+// 		_, n := binary.Uvarint(requestBuffer[curr:]) // header tagged fields
+// 		if n > 0 {
+// 			curr += n
+// 		}
+// 	}
+
+// 	// Fetch v16 body fixed fields:
+// 	// replica_id, max_wait_ms, min_bytes, max_bytes, isolation_level, session_id, session_epoch
+// 	const fixedFetchFields = 4 + 4 + 4 + 1 + 4 + 4
+// 	if curr+fixedFetchFields <= len(requestBuffer) {
+// 		curr += fixedFetchFields
+// 	}
+
+// 	// Topics: COMPACT_ARRAY
+// 	if curr < len(requestBuffer) {
+// 		topicArrayLen, n := binary.Uvarint(requestBuffer[curr:])
+// 		if n > 0 {
+// 			curr += n
+// 			numTopics := int(topicArrayLen) - 1
+// 			if numTopics < 0 {
+// 				numTopics = 0
+// 			}
+
+// 			for i := 0; i < numTopics && curr < len(requestBuffer); i++ {
+// 				if curr+16 > len(requestBuffer) {
+// 					break
+// 				}
+
+// 				topicID := make([]byte, 16)
+// 				copy(topicID, requestBuffer[curr:curr+16])
+// 				curr += 16
+
+// 				partitions := make([]int32, 0)
+// 				partitionArrayLen, pn := binary.Uvarint(requestBuffer[curr:])
+// 				if pn <= 0 {
+// 					break
+// 				}
+// 				curr += pn
+// 				numPartitions := int(partitionArrayLen) - 1
+// 				if numPartitions < 0 {
+// 					numPartitions = 0
+// 				}
+
+// 				for p := 0; p < numPartitions && curr < len(requestBuffer); p++ {
+// 					// FetchPartition fields:
+// 					// partition, current_leader_epoch, fetch_offset, last_fetched_epoch, log_start_offset, partition_max_bytes
+// 					const fetchPartitionFields = 4 + 4 + 8 + 4 + 8 + 4
+// 					if curr+fetchPartitionFields > len(requestBuffer) {
+// 						break
+// 					}
+
+// 					partitionIndex := int32(binary.BigEndian.Uint32(requestBuffer[curr : curr+4]))
+// 					partitions = append(partitions, partitionIndex)
+// 					curr += fetchPartitionFields
+
+// 					// Partition tagged fields
+// 					_, tagsN := binary.Uvarint(requestBuffer[curr:])
+// 					if tagsN <= 0 {
+// 						break
+// 					}
+// 					curr += tagsN
+// 				}
+
+// 				// Topic tagged fields
+// 				if curr < len(requestBuffer) {
+// 					_, tagsN := binary.Uvarint(requestBuffer[curr:])
+// 					if tagsN > 0 {
+// 						curr += tagsN
+// 					}
+// 				}
+
+// 				topics = append(topics, fetchTopicRequest{
+// 					topicID:    topicID,
+// 					partitions: partitions,
+// 				})
+// 			}
+// 		}
+// 	}
+
+// 	// Build response
+// 	var b bytes.Buffer
+// 	binary.Write(&b, binary.BigEndian, correlationID)
+// 	b.WriteByte(0) // Response header tagged fields
+
+// 	binary.Write(&b, binary.BigEndian, int32(0)) // ThrottleTimeMs
+// 	binary.Write(&b, binary.BigEndian, int16(0)) // ErrorCode
+// 	binary.Write(&b, binary.BigEndian, int32(0)) // SessionId
+
+// 	writeCompactArrayLen(&b, len(topics))
+// 	for _, topic := range topics {
+// 		b.Write(topic.topicID)
+// 		writeCompactArrayLen(&b, len(topic.partitions))
+
+// 		for _, partitionIndex := range topic.partitions {
+// 			binary.Write(&b, binary.BigEndian, partitionIndex)
+// 			binary.Write(&b, binary.BigEndian, int16(100)) // UNKNOWN_TOPIC_ID
+// 			binary.Write(&b, binary.BigEndian, int64(0))   // HighWatermark
+// 			binary.Write(&b, binary.BigEndian, int64(0))   // LastStableOffset
+// 			binary.Write(&b, binary.BigEndian, int64(0))   // LogStartOffset
+// 			b.WriteByte(1)                                 // AbortedTransactions: empty compact array
+// 			binary.Write(&b, binary.BigEndian, int32(-1))  // PreferredReadReplica
+// 			b.WriteByte(0)                                 // Records: null compact bytes
+// 			b.WriteByte(0)                                 // Partition tagged fields
+// 		}
+
+// 		b.WriteByte(0) // Topic tagged fields
+// 	}
+
+// 	b.WriteByte(0) // Response body tagged fields
+
+// 	res := b.Bytes()
+// 	final := make([]byte, 4+len(res))
+// 	binary.BigEndian.PutUint32(final[0:4], uint32(len(res)))
+// 	copy(final[4:], res)
+// 	connection.Write(final)
+// }
+
+
+
+
+
 func processFetchRequest(connection net.Conn, correlationID uint32, requestBuffer []byte) {
 	type fetchTopicRequest struct {
 		topicID    []byte
 		partitions []int32
 	}
-
 	writeCompactArrayLen := func(buf *bytes.Buffer, count int) {
 		var tmp [10]byte
 		n := binary.PutUvarint(tmp[:], uint64(count+1))
 		buf.Write(tmp[:n])
 	}
-
-	curr := 8 // ApiKey + ApiVersion + CorrelationID
+	curr := 8 // api_key + api_version + correlation_id
 	topics := make([]fetchTopicRequest, 0)
-
-	// Request header v2: client_id (nullable string) + tagged fields
+	// RequestHeader v2: client_id (nullable string) + tagged fields
 	if curr+2 <= len(requestBuffer) {
 		clientIDLen := int16(binary.BigEndian.Uint16(requestBuffer[curr : curr+2]))
 		curr += 2
@@ -420,22 +563,19 @@ func processFetchRequest(connection net.Conn, correlationID uint32, requestBuffe
 			curr += int(clientIDLen)
 		}
 	}
-
 	if curr < len(requestBuffer) {
 		_, n := binary.Uvarint(requestBuffer[curr:]) // header tagged fields
 		if n > 0 {
 			curr += n
 		}
 	}
-
-	// Fetch v16 body fixed fields:
-	// replica_id, max_wait_ms, min_bytes, max_bytes, isolation_level, session_id, session_epoch
+	// CodeCrafters fetch body layout in this stage:
+	// max_wait_ms, min_bytes, max_bytes, isolation_level, session_id, session_epoch
 	const fixedFetchFields = 4 + 4 + 4 + 1 + 4 + 4
 	if curr+fixedFetchFields <= len(requestBuffer) {
 		curr += fixedFetchFields
 	}
-
-	// Topics: COMPACT_ARRAY
+	// topics => COMPACT_ARRAY
 	if curr < len(requestBuffer) {
 		topicArrayLen, n := binary.Uvarint(requestBuffer[curr:])
 		if n > 0 {
@@ -444,16 +584,13 @@ func processFetchRequest(connection net.Conn, correlationID uint32, requestBuffe
 			if numTopics < 0 {
 				numTopics = 0
 			}
-
 			for i := 0; i < numTopics && curr < len(requestBuffer); i++ {
 				if curr+16 > len(requestBuffer) {
 					break
 				}
-
 				topicID := make([]byte, 16)
 				copy(topicID, requestBuffer[curr:curr+16])
 				curr += 16
-
 				partitions := make([]int32, 0)
 				partitionArrayLen, pn := binary.Uvarint(requestBuffer[curr:])
 				if pn <= 0 {
@@ -464,35 +601,30 @@ func processFetchRequest(connection net.Conn, correlationID uint32, requestBuffe
 				if numPartitions < 0 {
 					numPartitions = 0
 				}
-
 				for p := 0; p < numPartitions && curr < len(requestBuffer); p++ {
-					// FetchPartition fields:
-					// partition, current_leader_epoch, fetch_offset, last_fetched_epoch, log_start_offset, partition_max_bytes
+					// partition, current_leader_epoch, fetch_offset,
+					// last_fetched_epoch, log_start_offset, partition_max_bytes
 					const fetchPartitionFields = 4 + 4 + 8 + 4 + 8 + 4
 					if curr+fetchPartitionFields > len(requestBuffer) {
 						break
 					}
-
 					partitionIndex := int32(binary.BigEndian.Uint32(requestBuffer[curr : curr+4]))
 					partitions = append(partitions, partitionIndex)
 					curr += fetchPartitionFields
-
-					// Partition tagged fields
+					// partition tagged fields
 					_, tagsN := binary.Uvarint(requestBuffer[curr:])
 					if tagsN <= 0 {
 						break
 					}
 					curr += tagsN
 				}
-
-				// Topic tagged fields
+				// topic tagged fields
 				if curr < len(requestBuffer) {
 					_, tagsN := binary.Uvarint(requestBuffer[curr:])
 					if tagsN > 0 {
 						curr += tagsN
 					}
 				}
-
 				topics = append(topics, fetchTopicRequest{
 					topicID:    topicID,
 					partitions: partitions,
@@ -500,44 +632,54 @@ func processFetchRequest(connection net.Conn, correlationID uint32, requestBuffe
 			}
 		}
 	}
-
-	// Build response
+	// Build FetchResponse v16
 	var b bytes.Buffer
 	binary.Write(&b, binary.BigEndian, correlationID)
-	b.WriteByte(0) // Response header tagged fields
-
-	binary.Write(&b, binary.BigEndian, int32(0)) // ThrottleTimeMs
-	binary.Write(&b, binary.BigEndian, int16(0)) // ErrorCode
-	binary.Write(&b, binary.BigEndian, int32(0)) // SessionId
-
+	b.WriteByte(0) // response header tagged fields
+	binary.Write(&b, binary.BigEndian, int32(0)) // throttle_time_ms
+	binary.Write(&b, binary.BigEndian, int16(0)) // body error_code
+	binary.Write(&b, binary.BigEndian, int32(0)) // session_id
 	writeCompactArrayLen(&b, len(topics))
 	for _, topic := range topics {
 		b.Write(topic.topicID)
 		writeCompactArrayLen(&b, len(topic.partitions))
-
+		_, topicErr := getTopicNameFromID(topic.topicID)
 		for _, partitionIndex := range topic.partitions {
+			partitionErr := int16(0) // empty-topic stage expects NO_ERROR for known topic
+			highWatermark := int64(0)
+			lastStableOffset := int64(0)
+			logStartOffset := int64(0)
+			abortedTransactionsLen := byte(0) // null/empty is acceptable for this stage
+			if topicErr != 0 {
+				partitionErr = 100 // UNKNOWN_TOPIC_ID
+				highWatermark = -1
+				lastStableOffset = -1
+				logStartOffset = -1
+				abortedTransactionsLen = 1 // empty compact array
+			}
 			binary.Write(&b, binary.BigEndian, partitionIndex)
-			binary.Write(&b, binary.BigEndian, int16(100)) // UNKNOWN_TOPIC_ID
-			binary.Write(&b, binary.BigEndian, int64(0))   // HighWatermark
-			binary.Write(&b, binary.BigEndian, int64(0))   // LastStableOffset
-			binary.Write(&b, binary.BigEndian, int64(0))   // LogStartOffset
-			b.WriteByte(1)                                 // AbortedTransactions: empty compact array
-			binary.Write(&b, binary.BigEndian, int32(-1))  // PreferredReadReplica
-			b.WriteByte(0)                                 // Records: null compact bytes
-			b.WriteByte(0)                                 // Partition tagged fields
+			binary.Write(&b, binary.BigEndian, partitionErr)
+			binary.Write(&b, binary.BigEndian, highWatermark)
+			binary.Write(&b, binary.BigEndian, lastStableOffset)
+			binary.Write(&b, binary.BigEndian, logStartOffset)
+			b.WriteByte(abortedTransactionsLen)
+			binary.Write(&b, binary.BigEndian, int32(-1)) // preferred_read_replica
+			b.WriteByte(1)                                // records: compact record bytes size = 1 (empty)
+			b.WriteByte(0)                                // partition tagged fields
 		}
-
-		b.WriteByte(0) // Topic tagged fields
+		b.WriteByte(0) // topic tagged fields
 	}
-
-	b.WriteByte(0) // Response body tagged fields
-
+	b.WriteByte(0) // response body tagged fields
 	res := b.Bytes()
 	final := make([]byte, 4+len(res))
 	binary.BigEndian.PutUint32(final[0:4], uint32(len(res)))
 	copy(final[4:], res)
 	connection.Write(final)
 }
+
+
+
+
 
 func processTopicPartitionResponse(connection net.Conn, correlationID uint32, topicNames []string) {
 	var b bytes.Buffer
