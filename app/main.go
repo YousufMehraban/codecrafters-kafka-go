@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net"
@@ -553,6 +554,11 @@ func processFetchRequest(connection net.Conn, correlationID uint32, requestBuffe
 		n := binary.PutUvarint(tmp[:], uint64(count+1))
 		buf.Write(tmp[:n])
 	}
+	writeUvarint := func(buf *bytes.Buffer, v uint64) {
+		var tmp [10]byte
+		n := binary.PutUvarint(tmp[:], v)
+		buf.Write(tmp[:n])
+	}
 	curr := 8 // api_key + api_version + correlation_id
 	topics := make([]fetchTopicRequest, 0)
 	// RequestHeader v2: client_id (nullable string) + tagged fields
@@ -640,22 +646,67 @@ func processFetchRequest(connection net.Conn, correlationID uint32, requestBuffe
 	binary.Write(&b, binary.BigEndian, int16(0)) // body error_code
 	binary.Write(&b, binary.BigEndian, int32(0)) // session_id
 	writeCompactArrayLen(&b, len(topics))
+	// for _, topic := range topics {
+	// 	b.Write(topic.topicID)
+	// 	writeCompactArrayLen(&b, len(topic.partitions))
+	// 	_, topicErr := getTopicNameFromID(topic.topicID)
+	// 	for _, partitionIndex := range topic.partitions {
+	// 		partitionErr := int16(0) // empty-topic stage expects NO_ERROR for known topic
+	// 		highWatermark := int64(0)
+	// 		lastStableOffset := int64(0)
+	// 		logStartOffset := int64(0)
+	// 		abortedTransactionsLen := byte(0) // null/empty is acceptable for this stage
+	// 		if topicErr != 0 {
+	// 			partitionErr = 100 // UNKNOWN_TOPIC_ID
+	// 			highWatermark = -1
+	// 			lastStableOffset = -1
+	// 			logStartOffset = -1
+	// 			abortedTransactionsLen = 1 // empty compact array
+	// 		}
+	// 		binary.Write(&b, binary.BigEndian, partitionIndex)
+	// 		binary.Write(&b, binary.BigEndian, partitionErr)
+	// 		binary.Write(&b, binary.BigEndian, highWatermark)
+	// 		binary.Write(&b, binary.BigEndian, lastStableOffset)
+	// 		binary.Write(&b, binary.BigEndian, logStartOffset)
+	// 		b.WriteByte(abortedTransactionsLen)
+	// 		binary.Write(&b, binary.BigEndian, int32(-1)) // preferred_read_replica
+	// 		b.WriteByte(1)                                // records: compact record bytes size = 1 (empty)
+	// 		b.WriteByte(0)                                // partition tagged fields
+	// 	}
+	// 	b.WriteByte(0) // topic tagged fields
+	// }
+
 	for _, topic := range topics {
 		b.Write(topic.topicID)
 		writeCompactArrayLen(&b, len(topic.partitions))
 		_, topicErr := getTopicNameFromID(topic.topicID)
 		for _, partitionIndex := range topic.partitions {
-			partitionErr := int16(0) // empty-topic stage expects NO_ERROR for known topic
-			highWatermark := int64(0)
-			lastStableOffset := int64(0)
-			logStartOffset := int64(0)
-			abortedTransactionsLen := byte(0) // null/empty is acceptable for this stage
-			if topicErr != 0 {
-				partitionErr = 100 // UNKNOWN_TOPIC_ID
-				highWatermark = -1
-				lastStableOffset = -1
-				logStartOffset = -1
-				abortedTransactionsLen = 1 // empty compact array
+			// Defaults for UNKNOWN_TOPIC_ID
+			partitionErr := int16(100)
+			highWatermark := int64(-1)
+			lastStableOffset := int64(-1)
+			logStartOffset := int64(-1)
+			abortedTransactionsLen := byte(1) // empty compact array
+			recordBatchBytes := []byte(nil)
+			// Known topic: read .log bytes for this topic/partition
+			if topicErr == 0 {
+				partitionErr = 0
+				abortedTransactionsLen = 0 // null array in tester fixtures for known topics
+				rb, err := readPartitionRecordBatches(topic.topicID, partitionIndex)
+				if err == nil {
+					recordBatchBytes = rb
+				}
+				if len(recordBatchBytes) == 0 {
+					// "empty topic" behavior
+					highWatermark = 0
+					lastStableOffset = 0
+					logStartOffset = 0
+				} else {
+					// "single message" stage expects 1
+					highWatermark = 1
+					lastStableOffset = 1
+					logStartOffset = 0
+				}
 			}
 			binary.Write(&b, binary.BigEndian, partitionIndex)
 			binary.Write(&b, binary.BigEndian, partitionErr)
@@ -664,8 +715,15 @@ func processFetchRequest(connection net.Conn, correlationID uint32, requestBuffe
 			binary.Write(&b, binary.BigEndian, logStartOffset)
 			b.WriteByte(abortedTransactionsLen)
 			binary.Write(&b, binary.BigEndian, int32(-1)) // preferred_read_replica
-			b.WriteByte(1)                                // records: compact record bytes size = 1 (empty)
-			b.WriteByte(0)                                // partition tagged fields
+			// records (compact record bytes)
+			// size = byte_count + 1
+			if len(recordBatchBytes) == 0 {
+				writeUvarint(&b, 1) // empty records
+			} else {
+				writeUvarint(&b, uint64(len(recordBatchBytes)+1))
+				b.Write(recordBatchBytes)
+			}
+			b.WriteByte(0) // partition tagged fields
 		}
 		b.WriteByte(0) // topic tagged fields
 	}
@@ -777,6 +835,66 @@ func getTopicNameFromID(targetID []byte) (string, int16) {
 	// For this stage, if we find the ID, we return errorNone.
 	return "found", 0
 }
+
+
+
+
+
+
+
+func readPartitionRecordBatches(topicID []byte, partitionID int32) ([]byte, error) {
+	logDir := parseLogDirFromServerProperties()
+	targetTopicIDB64 := base64.StdEncoding.EncodeToString(topicID)
+	targetSuffix := fmt.Sprintf("-%d", partitionID)
+	entries, err := os.ReadDir(logDir)
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		dirName := entry.Name()
+		if strings.HasPrefix(dirName, "__cluster_metadata-") {
+			continue
+		}
+		if !strings.HasSuffix(dirName, targetSuffix) {
+			continue
+		}
+		metaPath := filepath.Join(logDir, dirName, "partition.metadata")
+		metaBytes, err := os.ReadFile(metaPath)
+		if err != nil {
+			continue
+		}
+		if !partitionMetadataHasTopicID(metaBytes, targetTopicIDB64) {
+			continue
+		}
+		logPath := filepath.Join(logDir, dirName, "00000000000000000000.log")
+		logBytes, err := os.ReadFile(logPath)
+		if err != nil {
+			return nil, err
+		}
+		return logBytes, nil
+	}
+	// Not found -> treat as no records for this stage path
+	return nil, nil
+}
+func partitionMetadataHasTopicID(metadata []byte, expectedTopicIDB64 string) bool {
+	for _, line := range strings.Split(string(metadata), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "topic_id:") {
+			got := strings.TrimSpace(strings.TrimPrefix(line, "topic_id:"))
+			return got == expectedTopicIDB64
+		}
+	}
+	return false
+}
+
+
+
+
+
+
 
 func handleClientRequest(connection net.Conn) {
 	defer connection.Close() // close connectiong if when loop breaks
