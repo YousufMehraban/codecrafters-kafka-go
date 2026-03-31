@@ -424,7 +424,7 @@ func processTopicPartitionResponse(connection net.Conn, correlationID uint32, to
 	// Sort topic names to match tester's expected ordering.
 	sortedTopicNames := append([]string(nil), topicNames...)
 	sort.Strings(sortedTopicNames)
-	
+
 	// 3. Topics Array Length (N + 1)
 	b.WriteByte(byte(len(topicNames) + 1))
 
@@ -567,6 +567,25 @@ func partitionMetadataHasTopicID(metadata []byte, expectedTopicIDB64 string) boo
 
 
 
+
+
+func produceTopicPartitionExists(topicName string, partitionID int32) bool {
+	logDir := parseLogDirFromServerProperties()
+	partitionDir := filepath.Join(logDir, fmt.Sprintf("%s-%d", topicName, partitionID))
+	info, err := os.Stat(partitionDir)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	// extra guard: partition.metadata should exist in generated dirs
+	_, err = os.Stat(filepath.Join(partitionDir, "partition.metadata"))
+	return err == nil
+}
+
+
+
+
+
+
 func processProduceRequest(connection net.Conn, correlationID uint32, requestBuffer []byte) {
 	type produceTopicReq struct {
 		name       string
@@ -702,7 +721,7 @@ func processProduceRequest(connection net.Conn, correlationID uint32, requestBuf
 	}
 	// body tagged fields
 	_, _ = readUvarint()
-BUILD_RESPONSE:
+	BUILD_RESPONSE:
 	// ---- Build ProduceResponse v11 ----
 	var b bytes.Buffer
 	writeCompactArrayLen := func(buf *bytes.Buffer, count int) {
@@ -725,18 +744,26 @@ BUILD_RESPONSE:
 		writeCompactString(&b, t.name)
 		writeCompactArrayLen(&b, len(t.partitions))
 		for _, pid := range t.partitions {
-			// Stage ZF2 expects UNKNOWN_TOPIC_OR_PARTITION for these requests
-			binary.Write(&b, binary.BigEndian, pid)      // id
-			binary.Write(&b, binary.BigEndian, int16(3)) // error_code
-			binary.Write(&b, binary.BigEndian, int64(-1))
-			binary.Write(&b, binary.BigEndian, int64(-1))
-			binary.Write(&b, binary.BigEndian, int64(-1))
-			// record_errors: empty compact array (length=1)
-			b.WriteByte(1)
-			// error_message: compact nullable string NULL (0)
-			b.WriteByte(0)
-			// partition tagged fields
-			b.WriteByte(0)
+			errCode := int16(3) // UNKNOWN_TOPIC_OR_PARTITION
+			baseOffset := int64(-1)
+			logAppendTimeMs := int64(-1)
+			logStartOffset := int64(-1)
+			// ZF3 success path for valid topic+partition
+			if produceTopicPartitionExists(t.name, pid) {
+				errCode = 0
+				baseOffset = 0
+				// logAppendTimeMs remains -1
+				logStartOffset = 0
+			}
+			binary.Write(&b, binary.BigEndian, pid)
+			binary.Write(&b, binary.BigEndian, errCode)
+			binary.Write(&b, binary.BigEndian, baseOffset)
+			binary.Write(&b, binary.BigEndian, logAppendTimeMs)
+			binary.Write(&b, binary.BigEndian, logStartOffset)
+			// keep these unchanged for ZF2+ZF3
+			b.WriteByte(1) // record_errors: empty compact array
+			b.WriteByte(0) // error_message: null compact nullable string
+			b.WriteByte(0) // partition tagged fields
 		}
 		// topic tagged fields
 		b.WriteByte(0)
