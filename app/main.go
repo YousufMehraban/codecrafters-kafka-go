@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sort"
 )
 
 // Ensures go fmt doesn't remove the "net" and "os" imports in stage 1 (feel free to remove this!)
@@ -420,6 +421,10 @@ func processTopicPartitionResponse(connection net.Conn, correlationID uint32, to
 	// 2. Throttle Time
 	binary.Write(&b, binary.BigEndian, uint32(0))
 
+	// Sort topic names to match tester's expected ordering.
+	sortedTopicNames := append([]string(nil), topicNames...)
+	sort.Strings(sortedTopicNames)
+	
 	// 3. Topics Array Length (N + 1)
 	b.WriteByte(byte(len(topicNames) + 1))
 
