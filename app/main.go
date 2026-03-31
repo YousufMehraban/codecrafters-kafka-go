@@ -321,9 +321,14 @@ func processFetchRequest(connection net.Conn, correlationID uint32, requestBuffe
 					lastStableOffset = 0
 					logStartOffset = 0
 				} else {
-					// "single message" stage expects 1
-					highWatermark = 1
-					lastStableOffset = 1
+					// multiple-messages stage: watermark = last_offset + 1
+					hw := computeHighWatermarkFromRecordBatches(recordBatchBytes)
+					if hw <= 0 {
+						// fallback for malformed/unexpected bytes
+						hw = 1
+					}
+					highWatermark = hw
+					lastStableOffset = hw
 					logStartOffset = 0
 				}
 			}
@@ -355,7 +360,47 @@ func processFetchRequest(connection net.Conn, correlationID uint32, requestBuffe
 }
 
 
-
+func computeHighWatermarkFromRecordBatches(logBytes []byte) int64 {
+	// Kafka RecordBatch on disk:
+	// base_offset:int64 (8) + batch_length:int32 (4) + <batch_length bytes>
+	// last_offset_delta sits at offset 23 from batch start:
+	// 8 + 4 + 4(partitionLeaderEpoch) + 1(magic) + 4(crc) + 2(attributes) = 23
+	const (
+		baseOffsetPos      = 0
+		batchLengthPos     = 8
+		lastOffsetDeltaPos = 23
+		headerSize         = 12
+	)
+	cursor := 0
+	var maxWatermark int64
+	for cursor+headerSize <= len(logBytes) {
+		baseOffset := int64(binary.BigEndian.Uint64(logBytes[cursor+baseOffsetPos : cursor+baseOffsetPos+8]))
+		batchLength := int(binary.BigEndian.Uint32(logBytes[cursor+batchLengthPos : cursor+batchLengthPos+4]))
+		if batchLength <= 0 {
+			break
+		}
+		batchEnd := cursor + headerSize + batchLength
+		if batchEnd > len(logBytes) {
+			break
+		}
+		// Prefer exact last_offset_delta if present
+		if cursor+lastOffsetDeltaPos+4 <= batchEnd {
+			lastOffsetDelta := int32(binary.BigEndian.Uint32(logBytes[cursor+lastOffsetDeltaPos : cursor+lastOffsetDeltaPos+4]))
+			watermark := baseOffset + int64(lastOffsetDelta) + 1
+			if watermark > maxWatermark {
+				maxWatermark = watermark
+			}
+		} else {
+			// Safe fallback: at least one offset consumed by this batch
+			watermark := baseOffset + 1
+			if watermark > maxWatermark {
+				maxWatermark = watermark
+			}
+		}
+		cursor = batchEnd
+	}
+	return maxWatermark
+}
 
 
 func processTopicPartitionResponse(connection net.Conn, correlationID uint32, topicNames []string) {
