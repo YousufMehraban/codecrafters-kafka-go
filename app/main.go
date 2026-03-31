@@ -154,7 +154,7 @@ func sendApiVersionResponse(connection net.Conn, correlationID uint32, apiVersio
 
 	// 3. API Keys Array (Compact Array: N + 1)
 	// We are sending 3 keys (1, 18, 75), so length is 4.
-	b.WriteByte(4)
+	b.WriteByte(5)
 
 	// --- ApiKey 1: FETCH ---
 	binary.Write(&b, binary.BigEndian, int16(1))  // API Key
@@ -173,6 +173,13 @@ func sendApiVersionResponse(connection net.Conn, correlationID uint32, apiVersio
 	binary.Write(&b, binary.BigEndian, int16(0))  // Min Version
 	binary.Write(&b, binary.BigEndian, int16(0))  // Max Version
 	b.WriteByte(0)                                // Tag Buffer
+
+
+	binary.Write(&b, binary.BigEndian, int16(0))  // API Key (PRODUCE)
+	binary.Write(&b, binary.BigEndian, int16(0))  // Min Version
+	binary.Write(&b, binary.BigEndian, int16(11)) // Max Version
+	b.WriteByte(0)                                // Tag Buffer
+
 
 	// 4. Throttle Time (int32)
 	binary.Write(&b, binary.BigEndian, uint32(0))
