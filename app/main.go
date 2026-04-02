@@ -591,6 +591,198 @@ func writeProducePartitionLog(topicName string, partitionID int32, recordBatches
 
 
 
+// func processProduceRequest(connection net.Conn, correlationID uint32, requestBuffer []byte) {
+// 	type producePartitionReq struct {
+// 		id            int32
+// 		recordBatches []byte
+// 	}
+// 	type produceTopicReq struct {
+// 		name       string
+// 		partitions []producePartitionReq
+// 	}
+// 	var topics []produceTopicReq
+// 	curr := 8 // api_key + api_version + correlation_id
+// 	advance := func(n int) bool {
+// 		if n < 0 || curr+n > len(requestBuffer) {
+// 			curr = len(requestBuffer)
+// 			return false
+// 		}
+// 		curr += n
+// 		return true
+// 	}
+// 	readUvarint := func() (uint64, bool) {
+// 		if curr >= len(requestBuffer) {
+// 			return 0, false
+// 		}
+// 		v, n := binary.Uvarint(requestBuffer[curr:])
+// 		if n <= 0 {
+// 			return 0, false
+// 		}
+// 		curr += n
+// 		return v, true
+// 	}
+// 	readCompactArrayCount := func() (int, bool) {
+// 		v, ok := readUvarint()
+// 		if !ok {
+// 			return 0, false
+// 		}
+// 		count := int(v) - 1
+// 		if count < 0 {
+// 			count = 0
+// 		}
+// 		return count, true
+// 	}
+// 	readCompactString := func() (string, bool) {
+// 		v, ok := readUvarint()
+// 		if !ok || v == 0 {
+// 			return "", false
+// 		}
+// 		strLen := int(v - 1)
+// 		if curr+strLen > len(requestBuffer) {
+// 			return "", false
+// 		}
+// 		s := string(requestBuffer[curr : curr+strLen])
+// 		curr += strLen
+// 		return s, true
+// 	}
+// 	// ---- Parse RequestHeader v2 ----
+// 	// client_id (nullable string)
+// 	if curr+2 <= len(requestBuffer) {
+// 		clientIDLen := int(int16(binary.BigEndian.Uint16(requestBuffer[curr : curr+2])))
+// 		if !advance(2) {
+// 			goto BUILD_RESPONSE
+// 		}
+// 		if clientIDLen > 0 && !advance(clientIDLen) {
+// 			goto BUILD_RESPONSE
+// 		}
+// 	}
+// 	// header tagged buffer fields
+// 	if _, ok := readUvarint(); !ok {
+// 		goto BUILD_RESPONSE
+// 	}
+// 	// ---- Parse ProduceRequest body v11 ----
+// 	// transactional_id (compact nullable string): 0 => null, >0 => len-1 bytes
+// 	if txLen, ok := readUvarint(); ok {
+// 		if txLen > 1 && !advance(int(txLen-1)) {
+// 			goto BUILD_RESPONSE
+// 		}
+// 	} else {
+// 		goto BUILD_RESPONSE
+// 	}
+// 	// acks + timeout_ms
+// 	if !advance(2 + 4) {
+// 		goto BUILD_RESPONSE
+// 	}
+// 	// topics (compact array)
+// 	if topicCount, ok := readCompactArrayCount(); ok {
+// 		for i := 0; i < topicCount; i++ {
+// 			name, ok := readCompactString()
+// 			if !ok {
+// 				goto BUILD_RESPONSE
+// 			}
+// 			partitionCount, ok := readCompactArrayCount()
+// 			if !ok {
+// 				goto BUILD_RESPONSE
+// 			}
+// 			partitions := make([]producePartitionReq, 0, partitionCount)
+// 			for p := 0; p < partitionCount; p++ {
+// 				if curr+4 > len(requestBuffer) {
+// 					goto BUILD_RESPONSE
+// 				}
+// 				partitionID := int32(binary.BigEndian.Uint32(requestBuffer[curr : curr+4]))
+// 				curr += 4
+// 				// record_batches_size (uvarint): encoded as byte_count + 1
+// 				rbSize, ok := readUvarint()
+// 				if !ok {
+// 					goto BUILD_RESPONSE
+// 				}
+// 				rbLen := 0
+// 				if rbSize > 1 {
+// 					rbLen = int(rbSize - 1)
+// 				}
+// 				if curr+rbLen > len(requestBuffer) {
+// 					goto BUILD_RESPONSE
+// 				}
+// 				recordBatches := make([]byte, rbLen)
+// 				copy(recordBatches, requestBuffer[curr:curr+rbLen])
+// 				curr += rbLen
+// 				// partition tagged fields
+// 				if _, ok := readUvarint(); !ok {
+// 					goto BUILD_RESPONSE
+// 				}
+// 				partitions = append(partitions, producePartitionReq{
+// 					id:            partitionID,
+// 					recordBatches: recordBatches,
+// 				})
+// 			}
+// 			// topic tagged fields
+// 			if _, ok := readUvarint(); !ok {
+// 				goto BUILD_RESPONSE
+// 			}
+// 			topics = append(topics, produceTopicReq{
+// 				name:       name,
+// 				partitions: partitions,
+// 			})
+// 		}
+// 	}
+// 	// body tagged fields
+// 	_, _ = readUvarint()
+// BUILD_RESPONSE:
+// 	// ---- Build ProduceResponse v11 ----
+// 	var b bytes.Buffer
+// 	writeCompactArrayLen := func(buf *bytes.Buffer, count int) {
+// 		var tmp [10]byte
+// 		n := binary.PutUvarint(tmp[:], uint64(count+1))
+// 		buf.Write(tmp[:n])
+// 	}
+// 	writeCompactString := func(buf *bytes.Buffer, s string) {
+// 		var tmp [10]byte
+// 		n := binary.PutUvarint(tmp[:], uint64(len(s)+1))
+// 		buf.Write(tmp[:n])
+// 		buf.WriteString(s)
+// 	}
+// 	// ResponseHeader v1
+// 	binary.Write(&b, binary.BigEndian, correlationID)
+// 	b.WriteByte(0) // header tagged fields
+// 	// topics
+// 	writeCompactArrayLen(&b, len(topics))
+// 	for _, t := range topics {
+// 		writeCompactString(&b, t.name)
+// 		writeCompactArrayLen(&b, len(t.partitions))
+// 		for _, p := range t.partitions {
+// 			errCode := int16(3) // UNKNOWN_TOPIC_OR_PARTITION
+// 			baseOffset := int64(-1)
+// 			logAppendTimeMs := int64(-1)
+// 			logStartOffset := int64(-1)
+// 			// Valid topic+partition for LS8: write request record batch bytes to disk
+// 			if produceTopicPartitionExists(t.name, p.id) {
+// 				if err := writeProducePartitionLog(t.name, p.id, p.recordBatches); err == nil {
+// 					errCode = 0
+// 					baseOffset = 0
+// 					logStartOffset = 0
+// 				}
+// 			}
+// 			binary.Write(&b, binary.BigEndian, p.id)
+// 			binary.Write(&b, binary.BigEndian, errCode)
+// 			binary.Write(&b, binary.BigEndian, baseOffset)
+// 			binary.Write(&b, binary.BigEndian, logAppendTimeMs)
+// 			binary.Write(&b, binary.BigEndian, logStartOffset)
+// 			b.WriteByte(1) // record_errors: empty compact array
+// 			b.WriteByte(0) // error_message: null compact nullable string
+// 			b.WriteByte(0) // partition tagged fields
+// 		}
+// 		b.WriteByte(0) // topic tagged fields
+// 	}
+// 	binary.Write(&b, binary.BigEndian, int32(0)) // throttle_time_ms
+// 	b.WriteByte(0)                               // body tagged fields
+// 	res := b.Bytes()
+// 	final := make([]byte, 4+len(res))
+// 	binary.BigEndian.PutUint32(final[0:4], uint32(len(res)))
+// 	copy(final[4:], res)
+// 	connection.Write(final)
+// }
+
+
 func processProduceRequest(connection net.Conn, correlationID uint32, requestBuffer []byte) {
 	type producePartitionReq struct {
 		id            int32
@@ -645,8 +837,7 @@ func processProduceRequest(connection net.Conn, correlationID uint32, requestBuf
 		curr += strLen
 		return s, true
 	}
-	// ---- Parse RequestHeader v2 ----
-	// client_id (nullable string)
+	// Header v2
 	if curr+2 <= len(requestBuffer) {
 		clientIDLen := int(int16(binary.BigEndian.Uint16(requestBuffer[curr : curr+2])))
 		if !advance(2) {
@@ -656,24 +847,20 @@ func processProduceRequest(connection net.Conn, correlationID uint32, requestBuf
 			goto BUILD_RESPONSE
 		}
 	}
-	// header tagged buffer fields
-	if _, ok := readUvarint(); !ok {
+	if _, ok := readUvarint(); !ok { // header tag buffer
 		goto BUILD_RESPONSE
 	}
-	// ---- Parse ProduceRequest body v11 ----
-	// transactional_id (compact nullable string): 0 => null, >0 => len-1 bytes
-	if txLen, ok := readUvarint(); ok {
+	// Produce body v11
+	if txLen, ok := readUvarint(); ok { // transactional_id compact nullable string
 		if txLen > 1 && !advance(int(txLen-1)) {
 			goto BUILD_RESPONSE
 		}
 	} else {
 		goto BUILD_RESPONSE
 	}
-	// acks + timeout_ms
-	if !advance(2 + 4) {
+	if !advance(2 + 4) { // acks + timeout_ms
 		goto BUILD_RESPONSE
 	}
-	// topics (compact array)
 	if topicCount, ok := readCompactArrayCount(); ok {
 		for i := 0; i < topicCount; i++ {
 			name, ok := readCompactString()
@@ -691,8 +878,7 @@ func processProduceRequest(connection net.Conn, correlationID uint32, requestBuf
 				}
 				partitionID := int32(binary.BigEndian.Uint32(requestBuffer[curr : curr+4]))
 				curr += 4
-				// record_batches_size (uvarint): encoded as byte_count + 1
-				rbSize, ok := readUvarint()
+				rbSize, ok := readUvarint() // encoded as len+1
 				if !ok {
 					goto BUILD_RESPONSE
 				}
@@ -706,8 +892,7 @@ func processProduceRequest(connection net.Conn, correlationID uint32, requestBuf
 				recordBatches := make([]byte, rbLen)
 				copy(recordBatches, requestBuffer[curr:curr+rbLen])
 				curr += rbLen
-				// partition tagged fields
-				if _, ok := readUvarint(); !ok {
+				if _, ok := readUvarint(); !ok { // partition tag buffer
 					goto BUILD_RESPONSE
 				}
 				partitions = append(partitions, producePartitionReq{
@@ -715,8 +900,7 @@ func processProduceRequest(connection net.Conn, correlationID uint32, requestBuf
 					recordBatches: recordBatches,
 				})
 			}
-			// topic tagged fields
-			if _, ok := readUvarint(); !ok {
+			if _, ok := readUvarint(); !ok { // topic tag buffer
 				goto BUILD_RESPONSE
 			}
 			topics = append(topics, produceTopicReq{
@@ -725,10 +909,8 @@ func processProduceRequest(connection net.Conn, correlationID uint32, requestBuf
 			})
 		}
 	}
-	// body tagged fields
-	_, _ = readUvarint()
+	_, _ = readUvarint() // body tag buffer
 BUILD_RESPONSE:
-	// ---- Build ProduceResponse v11 ----
 	var b bytes.Buffer
 	writeCompactArrayLen := func(buf *bytes.Buffer, count int) {
 		var tmp [10]byte
@@ -741,10 +923,9 @@ BUILD_RESPONSE:
 		buf.Write(tmp[:n])
 		buf.WriteString(s)
 	}
-	// ResponseHeader v1
+	// response header v1
 	binary.Write(&b, binary.BigEndian, correlationID)
-	b.WriteByte(0) // header tagged fields
-	// topics
+	b.WriteByte(0)
 	writeCompactArrayLen(&b, len(topics))
 	for _, t := range topics {
 		writeCompactString(&b, t.name)
@@ -754,7 +935,7 @@ BUILD_RESPONSE:
 			baseOffset := int64(-1)
 			logAppendTimeMs := int64(-1)
 			logStartOffset := int64(-1)
-			// Valid topic+partition for LS8: write request record batch bytes to disk
+			// CT4 key behavior: handle every partition independently
 			if produceTopicPartitionExists(t.name, p.id) {
 				if err := writeProducePartitionLog(t.name, p.id, p.recordBatches); err == nil {
 					errCode = 0
@@ -767,8 +948,8 @@ BUILD_RESPONSE:
 			binary.Write(&b, binary.BigEndian, baseOffset)
 			binary.Write(&b, binary.BigEndian, logAppendTimeMs)
 			binary.Write(&b, binary.BigEndian, logStartOffset)
-			b.WriteByte(1) // record_errors: empty compact array
-			b.WriteByte(0) // error_message: null compact nullable string
+			b.WriteByte(1) // record_errors empty compact array
+			b.WriteByte(0) // error_message null
 			b.WriteByte(0) // partition tagged fields
 		}
 		b.WriteByte(0) // topic tagged fields
@@ -781,8 +962,6 @@ BUILD_RESPONSE:
 	copy(final[4:], res)
 	connection.Write(final)
 }
-
-
 
 
 func handleClientRequest(connection net.Conn) {
