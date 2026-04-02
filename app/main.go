@@ -760,14 +760,17 @@ BUILD_RESPONSE:
 			binary.Write(&b, binary.BigEndian, baseOffset)
 			binary.Write(&b, binary.BigEndian, logAppendTimeMs)
 			binary.Write(&b, binary.BigEndian, logStartOffset)
+
 			b.WriteByte(1) // record_errors: empty compact array
 			b.WriteByte(0) // error_message: null compact nullable string
 			b.WriteByte(0) // partition tagged fields
 		}
+
 		b.WriteByte(0) // topic tagged fields
 	}
 	binary.Write(&b, binary.BigEndian, int32(0)) // throttle_time_ms
 	b.WriteByte(0)                               // body tagged fields
+	
 	res := b.Bytes()
 	final := make([]byte, 4+len(res))
 	binary.BigEndian.PutUint32(final[0:4], uint32(len(res)))
